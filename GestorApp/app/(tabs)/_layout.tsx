@@ -1,9 +1,3 @@
-/**
- * app/(tabs)/_layout.tsx
- * Tab bar con las 4 pantallas principales.
- * Reemplaza el _layout.tsx que tienes actualmente.
- */
-
 import { Colors } from '@/constants/DesignTokens';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
@@ -29,7 +23,6 @@ export default function TabLayout() {
         tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
       }}>
 
-      {/* 1. Panel de servicios */}
       <Tabs.Screen
         name="index"
         options={{
@@ -41,7 +34,6 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 2. Solicitar nueva visita */}
       <Tabs.Screen
         name="nuevo-servicio"
         options={{
@@ -53,13 +45,17 @@ export default function TabLayout() {
         }}
       />
 
-      {/* Ocultar el archivo viejo con typo si lo tienes */}
       <Tabs.Screen
-        name="nuevo-servico"
-        options={{ href: null }} // No aparece en el tab bar
+        name="mi-perfil"
+        options={{
+          title: 'Mi perfil',
+          headerTitle: 'Mi perfil',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-outline" size={size} color={color} />
+          ),
+        }}
       />
 
-      {/* 3. Gestores */}
       <Tabs.Screen
         name="gestores"
         options={{
@@ -71,7 +67,6 @@ export default function TabLayout() {
         }}
       />
 
-      {/* 4. Reportes */}
       <Tabs.Screen
         name="reportes"
         options={{
@@ -83,11 +78,8 @@ export default function TabLayout() {
         }}
       />
 
-      {/* Ocultar pantalla two del template original */}
-      <Tabs.Screen
-        name="two"
-        options={{ href: null }}
-      />
+      {/* Ocultar pantallas del template original */}
+      <Tabs.Screen name="two" options={{ href: null }} />
     </Tabs>
   );
 }

@@ -1,0 +1,12 @@
+import { Colors } from '@/constants/DesignTokens';
+import { Stack } from 'expo-router';
+
+export default function AuthLayout() {
+  return (
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.background } }}>
+      <Stack.Screen name="login" />
+      <Stack.Screen name="registro" />
+      <Stack.Screen name="registro-enviado" />
+    </Stack>
+  );
+}

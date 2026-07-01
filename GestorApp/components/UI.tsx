@@ -5,23 +5,10 @@
  */
 
 import { Colors, EstadoColors, Radius, TipoColors } from '@/constants/DesignTokens';
-import { EstadoServicio, TipoServicio } from '@/types';
+import { ESTADO_LABEL, EstadoServicio, TIPO_SERVICIO_LABEL, TipoServicio } from '@/types';
 import { StyleSheet, Text, View } from 'react-native';
 
-const TIPO_LABEL: Record<TipoServicio, string> = {
-  cobro: 'Cobro',
-  verificacion: 'Verificación',
-  legal: 'Legal',
-  notificacion: 'Notificación',
-};
-
-const ESTADO_LABEL: Record<EstadoServicio, string> = {
-  activo: 'Activo',
-  pendiente: 'Pendiente',
-  completado: 'Completado',
-  no_localizado: 'No localizado',
-  fallido: 'Fallido',
-};
+const TIPO_LABEL = TIPO_SERVICIO_LABEL;
 
 // ─── Badge tipo de servicio ────────────────────────────────────────────────
 export function BadgeTipo({ tipo }: { tipo: TipoServicio }) {

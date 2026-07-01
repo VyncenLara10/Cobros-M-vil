@@ -27,7 +27,7 @@ const OPCIONES: RoleOption[] = [
   {
     value: 'abogado',
     titulo: 'Abogado',
-    descripcion: 'Notificaciones y gestiones legales',
+    descripcion: 'Demandas, embargos y gestiones jurídicas',
     icono: 'briefcase-outline',
   },
 ];
@@ -57,13 +57,13 @@ export default function RoleSelector({ value, onChange }: RoleSelectorProps) {
             <View
               style={[
                 styles.iconWrap,
-                { backgroundColor: selected ? roleColor.bg : Colors.surfaceAlt },
+                { backgroundColor: selected ? roleColor.base : Colors.surfaceAlt },
               ]}
             >
               <Ionicons
                 name={opcion.icono}
                 size={22}
-                color={selected ? roleColor.fg : Colors.textSecondary}
+                color={selected ? roleColor.muted : Colors.textSecondary}
               />
             </View>
             <View style={styles.textWrap}>

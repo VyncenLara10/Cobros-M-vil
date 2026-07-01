@@ -1,67 +1,23 @@
-import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import { Colors } from '@/constants/DesignTokens';
-import { Ionicons } from '@expo/vector-icons';
-import { Tabs } from 'expo-router';
+import { Stack } from 'expo-router';
 
-export default function TabLayout() {
+export default function RootLayout() {
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: useClientOnlyValue(false, true),
-        tabBarStyle: {
-          backgroundColor: Colors.surface,
-          borderTopColor: Colors.border,
-          borderTopWidth: 1,
-        },
-        tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: Colors.textMuted,
-        headerStyle: { backgroundColor: Colors.background },
-        headerTintColor: Colors.textPrimary,
-      }}
-    >
-      {/* Pantalla principal: lista de servicios/casos asignados */}
-      <Tabs.Screen
-        name="index"
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.background } }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen
+        name="servicio/[id]"
         options={{
-          title: 'Mis Servicios',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="briefcase-outline" size={size} color={color} />
-          ),
+          headerShown: true,
+          headerTitle: 'Detalle del servicio',
+          headerStyle: { backgroundColor: Colors.surface },
+          headerTintColor: Colors.textPrimary,
+          headerShadowVisible: false,
         }}
       />
-
-      {/* Solicitar nuevo servicio (el flujo que pediste) */}
-      <Tabs.Screen
-        name="nuevo-servicio"
-        options={{
-          title: 'Solicitar',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="add-circle-outline" size={size} color={color} />
-          ),
-        }}
-      />
-
-      {/* Gestores afiliados */}
-      <Tabs.Screen
-        name="gestores"
-        options={{
-          title: 'Gestores',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="people-outline" size={size} color={color} />
-          ),
-        }}
-      />
-
-      {/* Reportes y estadísticas */}
-      <Tabs.Screen
-        name="reportes"
-        options={{
-          title: 'Reportes',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="bar-chart-outline" size={size} color={color} />
-          ),
-        }}
-      />
-    </Tabs>
+      <Stack.Screen name="+not-found" />
+    </Stack>
   );
 }

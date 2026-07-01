@@ -6,7 +6,7 @@
 import { Avatar } from '@/components/UI';
 import { Colors as COLORS, Radius as RADIUS, Spacing as SPACING } from '@/constants/DesignTokens';
 import { GESTORES_MOCK } from '@/data/mocks';
-import { Gestor, TipoGestor } from '@/types';
+import { Gestor, GESTOR_TIPO_LABEL, TipoGestor } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import {
