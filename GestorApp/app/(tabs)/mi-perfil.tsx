@@ -1,52 +1,77 @@
+/**
+ * app/(tabs)/mi-perfil.tsx
+ * Vista del GESTOR (usuario). Separa claramente DOS momentos:
+ *
+ *   1) ACEPTAR  → en "Solicitudes disponibles". Al aceptar, el servicio queda
+ *                 asignado al gestor en fase 'aceptado'. NO se llena nada aún.
+ *   2) COMPLETAR → en "Mis servicios activos". Solo desde aquí se va al
+ *                 formulario, y el formulario exige estar en la ubicación.
+ *
+ * Incluye un selector de rol (demo) para ver cómo cambia el feed por rol.
+ */
+
 import { BadgeTipo } from '@/components/UI';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import { CLIENTES_MOCK } from '@/data/clientesMock';
-import { serviciosDisponiblesPara, USUARIO_ACTUAL } from '@/data/mocks';
 import {
-    ROL_LABEL,
-    RolGestor,
-    Servicio,
-    SUBTIPO_VERIFICACION_LABEL,
-    TIPO_SERVICIO_LABEL,
+  aceptarServicio,
+  serviciosDeGestor,
+  serviciosDisponiblesPara,
+  USUARIO_ACTUAL,
+} from '@/data/mocks';
+import {
+  comisionMaxCredito,
+  comisionMaxTotal,
+  CreditoCliente,
+  FASE_TRABAJO_LABEL,
+  ROL_LABEL,
+  RolGestor,
+  saldoTotalCreditos,
+  Servicio,
+  subtiposTexto,
+  TIPO_SERVICIO_LABEL,
 } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import {
-    Alert,
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 const ROLES: RolGestor[] = ['verificador', 'cobrador', 'abogado'];
 
 export default function MiPerfilScreen() {
-  // Rol activo (demo: se puede cambiar para ver el feed de cada rol)
   const [rol, setRol] = useState<RolGestor>(USUARIO_ACTUAL.tipo);
   const [disponible, setDisponible] = useState(USUARIO_ACTUAL.disponible);
   const [seleccion, setSeleccion] = useState<Servicio | null>(null);
+  // Fuerza recomputar los feeds tras mutar los mocks (aceptar/completar).
+  const [tick, setTick] = useState(0);
+  const refrescar = () => setTick((t) => t + 1);
 
-  const pendientes = useMemo(() => serviciosDisponiblesPara(rol), [rol]);
+  // Al volver de un formulario de completado, recomputar los feeds.
+  useFocusEffect(useCallback(() => { setTick((t) => t + 1); }, []));
 
-  // Info ampliada del cliente (si el servicio está enlazado a la BD)
+  const pendientes = useMemo(() => serviciosDisponiblesPara(rol), [rol, tick]);
+  const activos = useMemo(() => serviciosDeGestor(USUARIO_ACTUAL.id), [tick]);
+
   const clienteDB = seleccion?.cliente.clienteId
     ? CLIENTES_MOCK.find((c) => c.id === seleccion.cliente.clienteId)
     : undefined;
 
+  // ── ACEPTAR: asigna y cierra. NO abre formulario. ──
   const aceptar = (s: Servicio) => {
+    aceptarServicio(s.id, USUARIO_ACTUAL.id, USUARIO_ACTUAL.nombre);
     setSeleccion(null);
-    if (s.tipo === 'verificacion') {
-      // Abre el formulario de verificación con fotos
-      router.push(`/verificacion/${s.id}`);
-      return;
-    }
+    refrescar();
     Alert.alert(
-      'Solicitud aceptada',
-      `Aceptaste ${TIPO_SERVICIO_LABEL[s.tipo]} de ${s.cliente.nombre}. Queda asignada a ti.`,
+      '✅ Servicio aceptado',
+      `${TIPO_SERVICIO_LABEL[s.tipo]} de ${s.cliente.nombre} quedó asignado a ti.\n\nDirígete a la ubicación. Podrás completar el formulario cuando confirmes que llegaste al lugar.`,
     );
     // TODO: await fetch(`/api/casos/${s.id}/aceptar`, { method: 'POST' })
   };
@@ -55,6 +80,14 @@ export default function MiPerfilScreen() {
     setSeleccion(null);
     Alert.alert('Solicitud rechazada', 'Volverá a estar disponible para otros gestores.');
     // TODO: await fetch(`/api/casos/${s.id}/rechazar`, { method: 'POST' })
+  };
+
+  // ── COMPLETAR: solo desde "Mis servicios activos". Cada tipo tiene su form. ──
+  const irACompletar = (s: Servicio) => {
+    if (s.tipo === 'verificacion') router.push(`/verificacion/${s.id}`);
+    else if (s.tipo === 'cobro') router.push(`/cobro/${s.id}`);
+    else if (s.tipo === 'notificacion') router.push(`/notificacion/${s.id}`);
+    else if (s.tipo === 'legal') router.push(`/legal/${s.id}`);
   };
 
   return (
@@ -71,9 +104,9 @@ export default function MiPerfilScreen() {
               <View style={styles.rolBadge}>
                 <Text style={styles.rolBadgeText}>{ROL_LABEL[rol]}</Text>
               </View>
-              <Text style={styles.perfilRating}> {USUARIO_ACTUAL.calificacion.toFixed(1)}</Text>
+              <Text style={styles.perfilRating}>★ {USUARIO_ACTUAL.calificacion.toFixed(1)}</Text>
             </View>
-            <Text style={styles.perfilZona}> {USUARIO_ACTUAL.zona}</Text>
+            <Text style={styles.perfilZona}>📍 {USUARIO_ACTUAL.zona}</Text>
           </View>
           <Pressable
             style={[styles.dispChip, disponible ? styles.dispOn : styles.dispOff]}
@@ -93,21 +126,19 @@ export default function MiPerfilScreen() {
           </View>
           <View style={styles.statDivider} />
           <View style={styles.stat}>
-            <Text style={[styles.statValue, { color: Colors.success }]}>
-              Q {USUARIO_ACTUAL.comisionesAcumuladas.toLocaleString('es-GT')}
-            </Text>
-            <Text style={styles.statLabel}>Comisiones</Text>
+            <Text style={[styles.statValue, { color: Colors.info }]}>{activos.length}</Text>
+            <Text style={styles.statLabel}>En curso</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.stat}>
             <Text style={[styles.statValue, { color: Colors.warning }]}>{pendientes.length}</Text>
-            <Text style={styles.statLabel}>Pendientes</Text>
+            <Text style={styles.statLabel}>Disponibles</Text>
           </View>
         </View>
       </View>
 
       {/* ── Selector de rol (demo) ── */}
-      <Text style={styles.demoLabel}>Ver solicitudes como (demo)</Text>
+      <Text style={styles.demoLabel}>Ver como (demo)</Text>
       <View style={styles.rolesRow}>
         {ROLES.map((r) => {
           const activo = rol === r;
@@ -119,8 +150,54 @@ export default function MiPerfilScreen() {
         })}
       </View>
 
-      {/* ── Feed de solicitudes pendientes ── */}
-      <Text style={styles.sectionTitle}>Solicitudes pendientes</Text>
+      {/* ══ MIS SERVICIOS ACTIVOS (ya aceptados → completar) ══ */}
+      {activos.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Mis servicios activos</Text>
+          <Text style={styles.sectionSub}>Ya son tuyos. Completa el formulario al llegar a la ubicación.</Text>
+
+          {activos.map((s) => {
+            const enSitio = s.fase === 'en_sitio';
+            return (
+              <View key={s.id} style={[styles.activoCard, enSitio && { borderColor: Colors.success }]}>
+                <View style={styles.solicitudTop}>
+                  <BadgeTipo tipo={s.tipo} />
+                  {s.tipo === 'verificacion' && s.subtiposVerificacion && (
+                    <View style={styles.subChip}>
+                      <Text style={styles.subChipText}>{subtiposTexto(s.subtiposVerificacion)}</Text>
+                    </View>
+                  )}
+                  <Text style={styles.solicitudId}>{s.id}</Text>
+                </View>
+
+                <Text style={styles.solicitudNombre}>{s.cliente.nombre}</Text>
+                <Text style={styles.solicitudDir}>📍 {s.cliente.direccion} · {s.cliente.zona}</Text>
+
+                <View style={[styles.faseBadge, enSitio ? styles.faseEnSitio : styles.faseAceptado]}>
+                  <Ionicons
+                    name={enSitio ? 'location' : 'walk-outline'}
+                    size={13}
+                    color={enSitio ? Colors.success : Colors.info}
+                  />
+                  <Text style={[styles.faseText, { color: enSitio ? Colors.success : Colors.info }]}>
+                    {FASE_TRABAJO_LABEL[s.fase ?? 'aceptado']}
+                  </Text>
+                </View>
+
+                <Pressable style={styles.btnCompletar} onPress={() => irACompletar(s)}>
+                  <Ionicons name="clipboard-outline" size={16} color="#fff" />
+                  <Text style={styles.btnCompletarText}>Ir a completar</Text>
+                </Pressable>
+              </View>
+            );
+          })}
+
+          <View style={{ height: Spacing.xl }} />
+        </>
+      )}
+
+      {/* ══ SOLICITUDES DISPONIBLES (aceptar) ══ */}
+      <Text style={styles.sectionTitle}>Solicitudes disponibles</Text>
       <Text style={styles.sectionSub}>
         {rol === 'abogado'
           ? 'Como abogado ves notificaciones, verificaciones y gestiones legales.'
@@ -139,11 +216,9 @@ export default function MiPerfilScreen() {
           <Pressable key={s.id} style={styles.solicitudCard} onPress={() => setSeleccion(s)}>
             <View style={styles.solicitudTop}>
               <BadgeTipo tipo={s.tipo} />
-              {s.tipo === 'verificacion' && s.subtipoVerificacion && (
+              {s.tipo === 'verificacion' && s.subtiposVerificacion && (
                 <View style={styles.subChip}>
-                  <Text style={styles.subChipText}>
-                    {s.subtipoVerificacion === 'laboral' ? 'Laboral' : 'Domiciliar'}
-                  </Text>
+                  <Text style={styles.subChipText}>{subtiposTexto(s.subtiposVerificacion)}</Text>
                 </View>
               )}
               <Text style={styles.solicitudId}>{s.id}</Text>
@@ -155,7 +230,7 @@ export default function MiPerfilScreen() {
             <View style={styles.solicitudFooter}>
               <Text style={styles.solicitudMonto}>
                 {s.tipo === 'cobro'
-                  ? `Deuda Q ${s.deudaTotal.toLocaleString('es-GT')}`
+                  ? `Saldo Q ${s.deudaTotal.toLocaleString('es-GT')}`
                   : `Pago Q ${s.montoGestion.toLocaleString('es-GT')}`}
               </Text>
               <View style={styles.verChip}>
@@ -182,9 +257,9 @@ export default function MiPerfilScreen() {
                 </View>
 
                 <Text style={styles.modalNombre}>{seleccion.cliente.nombre}</Text>
-                {seleccion.tipo === 'verificacion' && seleccion.subtipoVerificacion && (
+                {seleccion.tipo === 'verificacion' && seleccion.subtiposVerificacion && (
                   <Text style={styles.modalSubtipo}>
-                    {SUBTIPO_VERIFICACION_LABEL[seleccion.subtipoVerificacion]}
+                    Verificación {subtiposTexto(seleccion.subtiposVerificacion)}
                   </Text>
                 )}
 
@@ -192,21 +267,62 @@ export default function MiPerfilScreen() {
                 <Text style={styles.modalSeccion}>INFORMACIÓN DEL CLIENTE</Text>
                 <InfoRow icon="call-outline" label="Teléfono" value={seleccion.cliente.telefono} />
                 <InfoRow icon="location-outline" label="Dirección" value={`${seleccion.cliente.direccion}, ${seleccion.cliente.zona}`} />
-                {clienteDB && (
+                {(seleccion.cliente.dpi || clienteDB?.dpi) && (
+                  <InfoRow icon="card-outline" label="DPI" value={seleccion.cliente.dpi ?? clienteDB!.dpi} />
+                )}
+                {(seleccion.cliente.municipio || clienteDB?.municipio) && (
+                  <InfoRow icon="business-outline" label="Municipio" value={`${seleccion.cliente.municipio ?? clienteDB?.municipio}`} />
+                )}
+                {seleccion.cliente.trabajo && (
+                  <InfoRow icon="briefcase-outline" label="Trabajo" value={seleccion.cliente.cargo ? `${seleccion.cliente.trabajo} · ${seleccion.cliente.cargo}` : seleccion.cliente.trabajo} />
+                )}
+                {seleccion.cliente.salario != null && (
+                  <InfoRow icon="wallet-outline" label="Salario" value={`Q ${seleccion.cliente.salario.toLocaleString('es-GT')}`} />
+                )}
+
+                {/* Referencias telefónicas */}
+                {seleccion.cliente.referencias && seleccion.cliente.referencias.length > 0 && (
                   <>
-                    <InfoRow icon="card-outline" label="DPI" value={clienteDB.dpi} />
-                    <InfoRow icon="business-outline" label="Municipio" value={`${clienteDB.municipio} · ${clienteDB.zona}`} />
+                    <Text style={styles.modalSeccion}>REFERENCIAS / CONTACTOS</Text>
+                    {seleccion.cliente.referencias.map((r, i) => (
+                      <InfoRow
+                        key={i}
+                        icon="people-outline"
+                        label={r.parentesco ?? 'Contacto'}
+                        value={`${r.nombre} · ${r.telefono}`}
+                      />
+                    ))}
                   </>
                 )}
 
-                {/* Info financiera solo para cobro (rol capacitado) */}
-                {seleccion.tipo === 'cobro' && (
+                {/* Info financiera solo para cobro: créditos por banco */}
+                {seleccion.tipo === 'cobro' && seleccion.creditos && seleccion.creditos.length > 0 && (
                   <>
-                    <Text style={styles.modalSeccion}>INFORMACIÓN DE COBRO</Text>
-                    <InfoRow icon="cash-outline" label="Deuda total" value={`Q ${seleccion.deudaTotal.toLocaleString('es-GT')}`} valueColor={Colors.danger} />
-                    {clienteDB?.cuentaOrigen && <InfoRow icon="document-outline" label="Origen" value={clienteDB.cuentaOrigen} />}
-                    {clienteDB?.diasMora != null && <InfoRow icon="time-outline" label="Días de mora" value={`${clienteDB.diasMora} días`} />}
-                    <InfoRow icon="pricetag-outline" label="Comisión" value={`${seleccion.comisionPct}% · Q ${seleccion.comisionCalculada.toLocaleString('es-GT')}`} valueColor={Colors.success} />
+                    <Text style={styles.modalSeccion}>DEUDAS POR BANCO</Text>
+                    <Text style={styles.cobroHint}>
+                      El cliente debe en {seleccion.creditos.length} banco{seleccion.creditos.length > 1 ? 's' : ''}; cada uno con su propia comisión.
+                    </Text>
+                    {seleccion.creditos.map((c) => (
+                      <CreditoRow key={c.id} c={c} />
+                    ))}
+
+                    <View style={styles.totalBox}>
+                      <View style={styles.totalRow}>
+                        <Text style={styles.totalLabel}>Saldo total a recuperar</Text>
+                        <Text style={styles.totalSaldo}>
+                          Q {saldoTotalCreditos(seleccion.creditos).toLocaleString('es-GT', { minimumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                      <View style={styles.totalRow}>
+                        <Text style={styles.totalLabel}>Tu comisión máxima (si recuperas todo)</Text>
+                        <Text style={styles.totalComision}>
+                          Q {comisionMaxTotal(seleccion.creditos).toLocaleString('es-GT', { minimumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                      <Text style={styles.totalNota}>
+                        La comisión se paga solo sobre lo que efectivamente recuperes de cada banco.
+                      </Text>
+                    </View>
                   </>
                 )}
 
@@ -231,6 +347,14 @@ export default function MiPerfilScreen() {
                 <Text style={styles.modalSeccion}>NOTAS</Text>
                 <Text style={styles.notasText}>{seleccion.notas}</Text>
 
+                {/* Aviso de flujo: aceptar ≠ completar */}
+                <View style={styles.flujoAviso}>
+                  <Ionicons name="lock-closed-outline" size={14} color={Colors.textSecondary} />
+                  <Text style={styles.flujoAvisoText}>
+                    Al aceptar, el servicio queda asignado a ti. El formulario se completa después, ya en la ubicación.
+                  </Text>
+                </View>
+
                 {/* Acciones */}
                 <View style={styles.accionesRow}>
                   <Pressable style={styles.btnRechazar} onPress={() => rechazar(seleccion)}>
@@ -239,9 +363,7 @@ export default function MiPerfilScreen() {
                   </Pressable>
                   <Pressable style={styles.btnAceptar} onPress={() => aceptar(seleccion)}>
                     <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
-                    <Text style={styles.btnAceptarText}>
-                      {seleccion.tipo === 'verificacion' ? 'Aceptar y llenar' : 'Aceptar caso'}
-                    </Text>
+                    <Text style={styles.btnAceptarText}>Aceptar servicio</Text>
                   </Pressable>
                 </View>
               </ScrollView>
@@ -259,6 +381,36 @@ function InfoRow({ icon, label, value, valueColor }: { icon: any; label: string;
       <Ionicons name={icon} size={16} color={Colors.textMuted} />
       <Text style={styles.infoLabel}>{label}</Text>
       <Text style={[styles.infoValue, valueColor ? { color: valueColor } : {}]}>{value}</Text>
+    </View>
+  );
+}
+
+function CreditoRow({ c }: { c: CreditoCliente }) {
+  return (
+    <View style={styles.creditoCard}>
+      <View style={styles.creditoHeader}>
+        <Text style={styles.creditoBanco}>{c.banco}</Text>
+        <Text style={styles.creditoPct}>{c.porcentajeComision}%</Text>
+      </View>
+      <Text style={styles.creditoNum}>{c.numeroCredito} · {c.tipoCredito}</Text>
+      <View style={styles.creditoGrid}>
+        <View style={styles.creditoCell}>
+          <Text style={styles.creditoCellLabel}>Saldo</Text>
+          <Text style={styles.creditoCellValue}>Q {c.saldoReal.toLocaleString('es-GT', { minimumFractionDigits: 2 })}</Text>
+        </View>
+        {c.diasAtraso != null && (
+          <View style={styles.creditoCell}>
+            <Text style={styles.creditoCellLabel}>Mora</Text>
+            <Text style={styles.creditoCellValue}>{c.diasAtraso} días</Text>
+          </View>
+        )}
+        <View style={styles.creditoCell}>
+          <Text style={styles.creditoCellLabel}>Comisión máx.</Text>
+          <Text style={[styles.creditoCellValue, { color: Colors.success }]}>
+            Q {comisionMaxCredito(c).toLocaleString('es-GT', { minimumFractionDigits: 2 })}
+          </Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -303,6 +455,7 @@ const styles = StyleSheet.create({
   emptyText: { ...Typography.caption, color: Colors.textMuted, textAlign: 'center', maxWidth: 260 },
 
   solicitudCard: { backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 0.5, borderColor: Colors.border, padding: Spacing.md, marginBottom: Spacing.sm },
+  activoCard: { backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.info, padding: Spacing.md, marginBottom: Spacing.sm },
   solicitudTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
   subChip: { backgroundColor: Colors.successMuted, paddingHorizontal: Spacing.sm, paddingVertical: 2, borderRadius: Radius.pill },
   subChipText: { ...Typography.micro, color: '#065F46', fontWeight: '700', textTransform: 'none', letterSpacing: 0 },
@@ -314,9 +467,17 @@ const styles = StyleSheet.create({
   verChip: { backgroundColor: Colors.surfaceAlt, paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: Radius.pill },
   verChipText: { ...Typography.micro, color: Colors.textSecondary, fontWeight: '600', textTransform: 'none', letterSpacing: 0 },
 
+  // Fase + botón completar (servicios activos)
+  faseBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radius.pill, marginBottom: Spacing.sm },
+  faseAceptado: { backgroundColor: Colors.infoMuted },
+  faseEnSitio: { backgroundColor: Colors.successMuted },
+  faseText: { ...Typography.micro, fontWeight: '700', textTransform: 'none', letterSpacing: 0 },
+  btnCompletar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs, paddingVertical: Spacing.md, borderRadius: Radius.md, backgroundColor: Colors.primary },
+  btnCompletarText: { ...Typography.subtitle, color: '#fff', fontWeight: '600' },
+
   // Modal
   modalOverlay: { flex: 1, backgroundColor: Colors.overlay, justifyContent: 'flex-end' },
-  modalCard: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, padding: Spacing.xl, maxHeight: '88%' },
+  modalCard: { backgroundColor: Colors.surface, borderTopLeftRadius: Radius.xl, borderTopRightRadius: Radius.xl, padding: Spacing.xl, maxHeight: '90%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.md },
   modalNombre: { ...Typography.title, color: Colors.textPrimary },
   modalSubtipo: { ...Typography.caption, color: Colors.success, fontWeight: '600', marginTop: 2 },
@@ -328,7 +489,29 @@ const styles = StyleSheet.create({
   avisoText: { ...Typography.caption, color: Colors.info, flex: 1 },
   notasText: { ...Typography.body, color: Colors.textSecondary, lineHeight: 20 },
 
-  accionesRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.xl },
+  // Créditos por banco
+  cobroHint: { ...Typography.caption, color: Colors.textSecondary, marginBottom: Spacing.sm },
+  creditoCard: { backgroundColor: Colors.surfaceAlt, borderRadius: Radius.md, borderWidth: 0.5, borderColor: Colors.border, padding: Spacing.md, marginBottom: Spacing.sm },
+  creditoHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  creditoBanco: { ...Typography.body, color: Colors.textPrimary, fontWeight: '700' },
+  creditoPct: { ...Typography.caption, color: Colors.warning, fontWeight: '800' },
+  creditoNum: { ...Typography.micro, color: Colors.textMuted, marginTop: 2, marginBottom: Spacing.sm, textTransform: 'none', letterSpacing: 0 },
+  creditoGrid: { flexDirection: 'row', gap: Spacing.md },
+  creditoCell: { flex: 1 },
+  creditoCellLabel: { ...Typography.micro, color: Colors.textMuted, textTransform: 'none', letterSpacing: 0 },
+  creditoCellValue: { ...Typography.caption, color: Colors.textPrimary, fontWeight: '700', marginTop: 2 },
+
+  totalBox: { backgroundColor: Colors.primaryMuted, borderRadius: Radius.md, padding: Spacing.md, marginTop: Spacing.xs },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  totalLabel: { ...Typography.caption, color: Colors.textSecondary, flex: 1 },
+  totalSaldo: { ...Typography.subtitle, color: Colors.textPrimary, fontWeight: '800' },
+  totalComision: { ...Typography.subtitle, color: Colors.success, fontWeight: '800' },
+  totalNota: { ...Typography.micro, color: Colors.textSecondary, marginTop: 4, textTransform: 'none', letterSpacing: 0 },
+
+  flujoAviso: { flexDirection: 'row', gap: Spacing.sm, backgroundColor: Colors.surfaceAlt, borderRadius: Radius.md, padding: Spacing.md, marginTop: Spacing.lg, alignItems: 'flex-start' },
+  flujoAvisoText: { ...Typography.micro, color: Colors.textSecondary, flex: 1, textTransform: 'none', letterSpacing: 0, lineHeight: 15 },
+
+  accionesRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.lg },
   btnRechazar: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs, paddingVertical: Spacing.md, borderRadius: Radius.md, backgroundColor: Colors.dangerMuted },
   btnRechazarText: { ...Typography.subtitle, color: Colors.danger, fontWeight: '600' },
   btnAceptar: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs, paddingVertical: Spacing.md, borderRadius: Radius.md, backgroundColor: Colors.success },

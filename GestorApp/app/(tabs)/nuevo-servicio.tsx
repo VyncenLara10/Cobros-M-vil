@@ -105,7 +105,18 @@ function rolesElegiblesTexto(tipo: TipoServicio): string {
 
 // ─── Notificación simulada ──────────────────────────────────────────────────
 
-function generarNotificacion(tipo: TipoServicio, cliente: DatosCliente, tipoLegal?: TipoGestionLegal) {
+function generarNotificacion(
+  tipo: TipoServicio,
+  cliente: DatosCliente,
+  opciones?: { tipoLegal?: TipoGestionLegal; comisionPct?: number; subtipos?: SubtipoVerificacion[] },
+) {
+  const tipoLegal = opciones?.tipoLegal;
+  const pct = opciones?.comisionPct ?? 15;
+  const saldo = parseFloat(cliente.monto_deuda || '0');
+  const comisionMax = saldo * (pct / 100);
+  const subtiposLabel = (opciones?.subtipos ?? [])
+    .map((s) => (s === 'laboral' ? 'Laboral' : 'Domiciliar'))
+    .join(' + ') || 'Domiciliar';
   const nombre = `${cliente.nombre} ${cliente.apellido}`.trim() || 'Cliente';
   const direccion = [cliente.direccion, cliente.colonia, cliente.municipio].filter(Boolean).join(', ');
   const monto = cliente.monto_deuda ? `Q ${parseFloat(cliente.monto_deuda).toLocaleString('es-GT')}` : 'monto no especificado';
@@ -115,7 +126,7 @@ function generarNotificacion(tipo: TipoServicio, cliente: DatosCliente, tipoLega
   const base = {
     cobro: {
       titulo: '💰 Nueva solicitud de cobro', receptor: 'Cobrador', icono: 'cash', color: Colors.warning,
-      pasos: [`Visitar a ${nombre}`, `Dirección: ${direccion || 'Ver detalles'}`, `Monto a cobrar: ${monto}`, `Comisión: 15% sobre lo recuperado`, `Teléfono: ${cliente.telefono || 'No indicado'}`],
+      pasos: [`Visitar a ${nombre}`, `Dirección: ${direccion || 'Ver detalles'}`, `Monto a cobrar: ${monto}`, `Comisión: ${pct}% sobre lo recuperado (máx. Q ${comisionMax.toLocaleString('es-GT', { minimumFractionDigits: 2 })})`, `Teléfono: ${cliente.telefono || 'No indicado'}`],
       mensaje: `Tienes una nueva solicitud de cobro para el ${fecha} a las ${hora}. Solo cobradores pueden aceptarla.`,
     },
     notificacion: {
@@ -125,8 +136,8 @@ function generarNotificacion(tipo: TipoServicio, cliente: DatosCliente, tipoLega
     },
     verificacion: {
       titulo: '🔍 Nueva verificación', receptor: 'Cualquier gestor', icono: 'search', color: Colors.success,
-      pasos: [`Verificar a: ${nombre}`, `Dirección: ${direccion || 'Ver detalles'}`, `Completar formulario de verificación`, `Subir fotografías requeridas`],
-      mensaje: `Verificación disponible el ${fecha}. Se la queda el primer gestor que la acepte. Al aceptarla se abre el formulario con fotos.`,
+      pasos: [`Verificar a: ${nombre}`, `Tipo: ${subtiposLabel}`, `Dirección: ${direccion || 'Ver detalles'}`, `Completar formulario en el lugar`, `Subir fotografías requeridas`],
+      mensaje: `Verificación (${subtiposLabel}) disponible el ${fecha}. Se la queda el primer gestor que la acepte. El formulario se completa estando en la ubicación.`,
     },
     legal: {
       titulo: '⚖️ Nueva gestión legal', receptor: 'Abogado (colegiado)', icono: 'briefcase', color: '#9B7BF0',
@@ -225,7 +236,8 @@ export default function NuevoServicioScreen() {
   const [paso, setPaso] = useState<'tipo' | 'cliente'>('tipo');
   const [tipoSeleccionado, setTipoSeleccionado] = useState<TipoServicio | null>(null);
   const [tipoLegal, setTipoLegal] = useState<TipoGestionLegal | null>(null);
-  const [subtipoVerif, setSubtipoVerif] = useState<SubtipoVerificacion>('domiciliar');
+  const [subtiposVerif, setSubtiposVerif] = useState<SubtipoVerificacion[]>(['domiciliar']);
+  const [comisionPctInput, setComisionPctInput] = useState('15');
   const [datos, setDatos] = useState<DatosCliente>(datosVacios);
   const [errores, setErrores] = useState<Partial<DatosCliente>>({});
   const [enviando, setEnviando] = useState(false);
@@ -238,6 +250,15 @@ export default function NuevoServicioScreen() {
     setDatos((prev) => ({ ...prev, [campo]: valor }));
     if (errores[campo]) setErrores((prev) => ({ ...prev, [campo]: undefined }));
   };
+
+  const toggleSubtipo = (s: SubtipoVerificacion) => {
+    setSubtiposVerif((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
+  };
+
+  // Comisión saneada (0–100) y montos derivados
+  const comisionPct = Math.min(100, Math.max(0, parseFloat(comisionPctInput || '0') || 0));
+  const saldoNum = parseFloat(datos.monto_deuda || '0') || 0;
+  const comisionMaxima = saldoNum * (comisionPct / 100);
 
   // Autollenar desde la BD al seleccionar un cliente
   const vincularCliente = (c: ClienteDB) => {
@@ -279,7 +300,11 @@ export default function NuevoServicioScreen() {
     // TODO: await fetch('/api/casos', { method: 'POST', body: payload })
     setTimeout(() => {
       setEnviando(false);
-      setNotif(generarNotificacion(tipoSeleccionado, datos, tipoLegal ?? undefined));
+      setNotif(generarNotificacion(tipoSeleccionado, datos, {
+        tipoLegal: tipoLegal ?? undefined,
+        comisionPct,
+        subtipos: subtiposVerif,
+      }));
       setModalVisible(true);
     }, 1000);
   };
@@ -289,7 +314,8 @@ export default function NuevoServicioScreen() {
     setPaso('tipo');
     setTipoSeleccionado(null);
     setTipoLegal(null);
-    setSubtipoVerif('domiciliar');
+    setSubtiposVerif(['domiciliar']);
+    setComisionPctInput('15');
     setDatos(datosVacios);
     setClienteVinculado(null);
     setErrores({});
@@ -346,23 +372,35 @@ export default function NuevoServicioScreen() {
           </View>
         )}
 
-        {/* Subtipo verificación */}
+        {/* Subtipo verificación (se puede elegir domiciliar, laboral o AMBAS) */}
         {tipoSeleccionado === 'verificacion' && (
           <View style={styles.subtipoSection}>
             <Text style={styles.subtipoTitle}>Tipo de verificación</Text>
-            {SUBTIPOS_VERIFICACION.map((s) => (
-              <Pressable
-                key={s.id}
-                style={[styles.subtipoCard, subtipoVerif === s.id && { borderColor: Colors.success, borderWidth: 2, backgroundColor: Colors.successMuted }]}
-                onPress={() => setSubtipoVerif(s.id)}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.subtipoLabel}>{s.label}</Text>
-                  <Text style={styles.subtipoDesc}>{s.desc}</Text>
-                </View>
-                {subtipoVerif === s.id && <Ionicons name="checkmark-circle" size={18} color={Colors.success} />}
-              </Pressable>
-            ))}
+            <Text style={styles.subtipoHint}>Puedes seleccionar una o ambas.</Text>
+            {SUBTIPOS_VERIFICACION.map((s) => {
+              const activo = subtiposVerif.includes(s.id);
+              return (
+                <Pressable
+                  key={s.id}
+                  style={[styles.subtipoCard, activo && { borderColor: Colors.success, borderWidth: 2, backgroundColor: Colors.successMuted }]}
+                  onPress={() => toggleSubtipo(s.id)}
+                >
+                  <View style={[styles.checkbox, activo && { backgroundColor: Colors.success, borderColor: Colors.success }]}>
+                    {activo && <Ionicons name="checkmark" size={14} color="#fff" />}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.subtipoLabel}>{s.label}</Text>
+                    <Text style={styles.subtipoDesc}>{s.desc}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+            {subtiposVerif.length === 2 && (
+              <View style={styles.ambasBadge}>
+                <Ionicons name="layers-outline" size={13} color={Colors.success} />
+                <Text style={styles.ambasText}>Verificación completa: domiciliar + laboral</Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -371,6 +409,7 @@ export default function NuevoServicioScreen() {
           onPress={() => {
             if (!tipoSeleccionado) return Alert.alert('Selecciona un tipo de servicio');
             if (tipoSeleccionado === 'legal' && !tipoLegal) return Alert.alert('Selecciona el tipo de gestión legal');
+            if (tipoSeleccionado === 'verificacion' && subtiposVerif.length === 0) return Alert.alert('Selecciona al menos un tipo de verificación');
             setPaso('cliente');
           }}
           style={styles.botonPrincipal}
@@ -395,7 +434,7 @@ export default function NuevoServicioScreen() {
           <Text style={[styles.tipoBannerText, { color: tipoConfig.color }]}>
             {tipoConfig.label}
             {tipoSeleccionado === 'legal' && tipoLegal ? ` · ${GESTIONES_LEGALES.find((g) => g.id === tipoLegal)?.label}` : ''}
-            {tipoSeleccionado === 'verificacion' ? ` · ${subtipoVerif === 'laboral' ? 'Laboral' : 'Domiciliar'}` : ''}
+            {tipoSeleccionado === 'verificacion' ? ` · ${subtiposVerif.map((s) => (s === 'laboral' ? 'Laboral' : 'Domiciliar')).join(' + ')}` : ''}
           </Text>
         </View>
 
@@ -451,15 +490,49 @@ export default function NuevoServicioScreen() {
         {tipoSeleccionado === 'cobro' && (
           <>
             <Text style={[styles.sectionLabel, { marginTop: Spacing.lg }]}>INFORMACIÓN FINANCIERA</Text>
-            <FormInput label="Monto de la deuda (Q) *" placeholder="0.00" keyboardType="decimal-pad" value={datos.monto_deuda} onChangeText={(t) => cambiarCampo('monto_deuda', t)} error={errores.monto_deuda} />
-            {datos.monto_deuda ? (
-              <View style={styles.comisionPreview}>
-                <Ionicons name="information-circle-outline" size={14} color={Colors.info} />
-                <Text style={styles.comisionText}>
-                  Comisión estimada del cobrador: Q {(parseFloat(datos.monto_deuda || '0') * 0.15).toLocaleString('es-GT', { minimumFractionDigits: 2 })} (15%)
+            <FormInput label="Saldo a recuperar (Q) *" placeholder="0.00" keyboardType="decimal-pad" value={datos.monto_deuda} onChangeText={(t) => cambiarCampo('monto_deuda', t)} error={errores.monto_deuda} />
+
+            <FormInput
+              label="Porcentaje de comisión (%)"
+              placeholder="15"
+              keyboardType="decimal-pad"
+              value={comisionPctInput}
+              onChangeText={setComisionPctInput}
+              hint="Modificable. Cada banco puede pactarse distinto."
+            />
+
+            {/* Comisión rápida con chips */}
+            <View style={styles.pctChips}>
+              {[10, 12, 15, 20].map((p) => (
+                <Pressable
+                  key={p}
+                  style={[styles.pctChip, comisionPct === p && styles.pctChipActivo]}
+                  onPress={() => setComisionPctInput(String(p))}
+                >
+                  <Text style={[styles.pctChipText, comisionPct === p && styles.pctChipTextActivo]}>{p}%</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {saldoNum > 0 && (
+              <View style={styles.comisionBox}>
+                <View style={styles.comisionRowTop}>
+                  <Text style={styles.comisionBoxLabel}>Comisión máxima (si recupera todo)</Text>
+                  <Text style={styles.comisionBoxMonto}>
+                    Q {comisionMaxima.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Text>
+                </View>
+                <Text style={styles.comisionBoxDetalle}>
+                  {comisionPct}% de Q {saldoNum.toLocaleString('es-GT', { minimumFractionDigits: 2 })}
                 </Text>
+                <View style={styles.comisionNota}>
+                  <Ionicons name="information-circle-outline" size={13} color={Colors.info} />
+                  <Text style={styles.comisionNotaText}>
+                    El cobrador gana el {comisionPct}% solo sobre el monto que efectivamente recupere; si recupera una parte, la comisión se calcula sobre esa parte.
+                  </Text>
+                </View>
               </View>
-            ) : null}
+            )}
           </>
         )}
 
@@ -545,6 +618,36 @@ const styles = StyleSheet.create({
   subtipoLabel: { ...Typography.body, color: Colors.textPrimary, fontWeight: '600' },
   subtipoDesc: { ...Typography.caption, color: Colors.textSecondary, marginTop: 2 },
   subtipoTarifa: { ...Typography.caption, color: Colors.textSecondary, fontWeight: '600' },
+  subtipoHint: { ...Typography.caption, color: Colors.textMuted, marginBottom: Spacing.sm },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: Colors.borderStrong,
+    alignItems: 'center', justifyContent: 'center', marginRight: Spacing.sm,
+  },
+  ambasBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.successMuted,
+    borderRadius: Radius.sm, paddingVertical: 6, paddingHorizontal: Spacing.sm, marginTop: 4,
+  },
+  ambasText: { ...Typography.caption, color: '#065F46', fontWeight: '600' },
+
+  // Comisión editable (cobro)
+  pctChips: { flexDirection: 'row', gap: Spacing.sm, marginTop: -Spacing.xs, marginBottom: Spacing.md },
+  pctChip: {
+    paddingVertical: 6, paddingHorizontal: Spacing.md, borderRadius: Radius.pill,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface,
+  },
+  pctChipActivo: { borderColor: Colors.warning, backgroundColor: Colors.warningMuted },
+  pctChipText: { ...Typography.caption, color: Colors.textSecondary, fontWeight: '600' },
+  pctChipTextActivo: { color: '#92400E' },
+  comisionBox: {
+    backgroundColor: Colors.warningMuted, borderRadius: Radius.md, padding: Spacing.md,
+    marginTop: -Spacing.xs, marginBottom: Spacing.md,
+  },
+  comisionRowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  comisionBoxLabel: { ...Typography.caption, color: '#92400E', fontWeight: '600', flex: 1 },
+  comisionBoxMonto: { ...Typography.subtitle, color: '#92400E', fontWeight: '800' },
+  comisionBoxDetalle: { ...Typography.caption, color: '#B45309', marginTop: 2 },
+  comisionNota: { flexDirection: 'row', gap: 6, marginTop: Spacing.sm, alignItems: 'flex-start' },
+  comisionNotaText: { ...Typography.micro, color: '#92400E', flex: 1, textTransform: 'none', letterSpacing: 0, lineHeight: 15 },
 
   backRow: { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.lg },
   backText: { ...Typography.caption, color: Colors.primary, fontWeight: '600', marginLeft: 4 },

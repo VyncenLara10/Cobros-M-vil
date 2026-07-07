@@ -211,9 +211,6 @@ export default function ReportesScreen() {
       {/* Top gestores */}
       <TopGestores />
 
-      <Text style={styles.footerNote}>
-        📌 Los datos mostrados son de prueba (mocks). Conecta el backend para ver datos reales.
-      </Text>
     </ScrollView>
   );
 }
