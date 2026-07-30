@@ -11,6 +11,9 @@ import PasoRol from '@/components/registro/PasoRol';
 import PasoZonaCobertura from '@/components/registro/PasoZonaCobertura';
 import Progress from '@/components/registro/Progress';
 import { Colors, Spacing, Typography } from '@/constants/DesignTokens';
+import { enviarSolicitudRegistro } from '@/data/solicitudesRegistro';
+import { validarPassword } from '@/domain/validators';
+import { useBottomInset } from '@/hooks/useBottomInset';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
@@ -29,6 +32,7 @@ const ETIQUETAS_PASOS = ['Rol', 'Datos', 'Perfil', 'Zona', 'Docs', 'Cuenta', 'Ac
 const TOTAL_PASOS = ETIQUETAS_PASOS.length;
 
 export default function RegistroScreen() {
+  const bottomInset = useBottomInset();
   const [pasoActual, setPasoActual] = useState(1);
 
   // ✅ FIX: usar datosRegistroVacios que ya tiene los campos correctos
@@ -59,8 +63,10 @@ export default function RegistroScreen() {
         if (!datos.dpiNumero.trim()) e.dpiNumero = 'El DPI es obligatorio';
         if (!datos.correo.trim()) e.correo = 'El correo es obligatorio';
         if (!datos.telefono.trim()) e.telefono = 'El teléfono es obligatorio';
-        if (!datos.password.trim()) e.password = 'La contraseña es obligatoria';
-        else if (datos.password.length < 8) e.password = 'Mínimo 8 caracteres';
+        {
+          const r = validarPassword(datos.password, { correo: datos.correo });
+          if (!r.ok) e.password = r.error;
+        }
         break;
 
       case 3:
@@ -124,6 +130,7 @@ export default function RegistroScreen() {
     setEnviando(true);
     // TODO: await fetch('/api/gestores/registro', { method: 'POST', body: JSON.stringify(datos) })
     setTimeout(() => {
+      enviarSolicitudRegistro(datos);
       setEnviando(false);
       router.replace('/(auth)/registro-enviado');
     }, 1500);
@@ -182,7 +189,7 @@ export default function RegistroScreen() {
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomInset + 36 }]}
         keyboardShouldPersistTaps="handled">
         {renderPaso()}
 
@@ -194,7 +201,7 @@ export default function RegistroScreen() {
         />
 
         {pasoActual === 1 && (
-          <Pressable onPress={() => router.push('/(auth)/login')} style={styles.loginLink}>
+          <Pressable onPress={() => router.push('/login')} style={styles.loginLink}>
             <Text style={styles.loginLinkText}>¿Ya tienes cuenta? Inicia sesión</Text>
           </Pressable>
         )}

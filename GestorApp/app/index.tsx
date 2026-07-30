@@ -6,5 +6,5 @@ export default function Index() {
   // const token = await AsyncStorage.getItem('token');
   // if (token) return <Redirect href="/(tabs)" />;
 
-  return <Redirect href="/(auth)/login" />;
+  return <Redirect href="/login" />;
 }

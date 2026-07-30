@@ -23,6 +23,7 @@ import {
   ubicacionParte,
 } from '@/data/mocks';
 import { SubtipoVerificacion } from '@/types';
+import { useBottomInset } from '@/hooks/useBottomInset';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -55,6 +56,7 @@ const META: Record<SubtipoVerificacion, { label: string; icon: string; lugar: st
 };
 
 export default function VerificacionScreen() {
+  const bottomInset = useBottomInset();
   const { id, parte } = useLocalSearchParams<{ id: string; parte?: string }>();
   const servicio = servicioPorId(id as string);
 
@@ -96,7 +98,7 @@ export default function VerificacionScreen() {
   if (!parteActiva) {
     const hechas = partes.filter((p) => estadoParte(servicio.id, p).completado).length;
     return (
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: bottomInset }]}>
         <Pressable style={styles.backRow} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={20} color={Colors.primary} />
           <Text style={styles.backText}>Volver</Text>
@@ -207,7 +209,7 @@ export default function VerificacionScreen() {
   // Candado de esta parte
   if (!enSitio && !yaCompletada) {
     return (
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: bottomInset }]}>
         <Pressable style={styles.backRow} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={20} color={Colors.primary} />
           <Text style={styles.backText}>Volver</Text>
@@ -239,7 +241,7 @@ export default function VerificacionScreen() {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: bottomInset }]}>
       <Pressable style={styles.backRow} onPress={() => router.back()}>
         <Ionicons name="arrow-back" size={20} color={Colors.primary} />
         <Text style={styles.backText}>Guardar y salir</Text>
@@ -302,7 +304,7 @@ export default function VerificacionScreen() {
         {DICTAMENES.map((d) => {
           const activo = dictamen === d.id;
           return (
-            <Pressable
+              <Pressable
               key={d.id}
               style={[styles.dictamenCard, { backgroundColor: activo ? d.bg : Colors.surface }, activo && { borderColor: d.color, borderWidth: 2 }]}
               onPress={() => setDictamen(d.id)}

@@ -4,7 +4,7 @@
  */
 
 import { Colors as COLORS, Radius as RADIUS, Spacing as SPACING } from '@/constants/DesignTokens';
-import { GESTORES_MOCK, SERVICIOS_MOCK } from '@/data/mocks';
+import { GESTORES_MOCK, puntosGestor, SERVICIOS_MOCK } from '@/data/mocks';
 import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -100,13 +100,14 @@ function TipoRow({ label, count, total, color, monto }: {
 
 function TopGestores() {
   const top = [...GESTORES_MOCK]
-    .sort((a, b) => b.serviciosCompletados - a.serviciosCompletados)
+    .map((g) => ({ g, puntos: puntosGestor(g.id) }))
+    .sort((a, b) => b.puntos - a.puntos)
     .slice(0, 3);
 
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>TOP GESTORES</Text>
-      {top.map((g, i) => (
+      <Text style={styles.sectionTitle}>TOP GESTORES · POR PUNTAJE</Text>
+      {top.map(({ g, puntos }, i) => (
         <View key={g.id} style={styles.gestorRow}>
           <View style={styles.rankCircle}>
             <Text style={styles.rankText}>#{i + 1}</Text>
@@ -116,7 +117,7 @@ function TopGestores() {
             <Text style={styles.gestorZona}>{g.zona}</Text>
           </View>
           <View style={styles.gestorStats}>
-            <Text style={styles.gestorCompletados}>{g.serviciosCompletados} serv.</Text>
+            <Text style={styles.gestorCompletados}>{puntos} pts · {g.serviciosCompletados} serv.</Text>
             <Text style={styles.gestorComision}>Q {g.comisionesAcumuladas.toLocaleString('es-GT')}</Text>
           </View>
         </View>

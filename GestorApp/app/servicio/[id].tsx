@@ -1,7 +1,8 @@
 import { BadgeEstado, BadgeTipo, DetailRow } from '@/components/UI';
 import { Colors as COLORS, Radius as RADIUS, Spacing as SPACING } from '@/constants/DesignTokens';
 import { SERVICIOS_MOCK } from '@/data/mocks';
-import { Servicio } from '@/types';
+import { useBottomInset } from '@/hooks/useBottomInset';
+import { ESTADO_LABEL, Servicio } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
@@ -55,6 +56,7 @@ function ModalPago({
   onCerrar: () => void;
 }) {
   const [monto, setMonto] = useState('');
+  const bottomInset = useBottomInset();
 
   const montoParsed = parseFloat(monto) || 0;
   const comision = montoParsed * (comisionPct / 100);
@@ -62,7 +64,7 @@ function ModalPago({
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={styles.modalOverlay}>
-        <View style={styles.modalCard}>
+        <View style={[styles.modalCard, { paddingBottom: bottomInset }]}>
           <Text style={styles.modalTitle}>Registrar pago recibido</Text>
           <Text style={styles.modalSub}>
             Deuda total: Q {deudaTotal.toLocaleString('es-GT')}
@@ -131,11 +133,12 @@ function ModalIntento({
   onCerrar: () => void;
 }) {
   const [nota, setNota] = useState('');
+  const bottomInset = useBottomInset();
 
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={styles.modalOverlay}>
-        <View style={styles.modalCard}>
+        <View style={[styles.modalCard, { paddingBottom: bottomInset }]}>
           <Text style={styles.modalTitle}>Registrar intento fallido</Text>
           <Text style={styles.modalSub}>Describe qué pasó al intentar la visita</Text>
 
@@ -170,6 +173,7 @@ function ModalIntento({
 
 export default function DetalleServicioScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const bottomInset = useBottomInset();
   const [modalPago, setModalPago] = useState(false);
   const [modalIntento, setModalIntento] = useState(false);
 
@@ -247,7 +251,7 @@ export default function DetalleServicioScreen() {
 
   return (
     <>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: 100 + bottomInset }]}>
         {/* Header back */}
         <Pressable style={styles.backRow} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={20} color={COLORS.info} />
@@ -431,7 +435,7 @@ export default function DetalleServicioScreen() {
 // ─── Estilos ─────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: COLORS.ba },
+  screen: { flex: 1, backgroundColor: COLORS.background },
   content: { padding: SPACING.md, paddingBottom: 100 },
 
   backRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: SPACING.lg },
@@ -515,7 +519,7 @@ const styles = StyleSheet.create({
   modalSub: { fontSize: 13, color: COLORS.textSecondary, marginBottom: SPACING.lg },
   inputLabel: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 6, fontWeight: '600' },
   input: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: COLORS.surfaceAlt,
     borderRadius: RADIUS.md,
     borderWidth: 0.5,
     borderColor: COLORS.border,
@@ -525,7 +529,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   comisionBox: {
-    backgroundColor: COLORS.bg,
+    backgroundColor: COLORS.surfaceAlt,
     borderRadius: RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.lg,

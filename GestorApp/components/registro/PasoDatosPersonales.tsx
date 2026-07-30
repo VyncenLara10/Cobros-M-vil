@@ -77,6 +77,7 @@ export default function PasoDatosPersonales({
         value={datos.password}
         onChangeText={(t) => onCambiarCampo('password', t)}
         error={errores.password}
+        hint={!errores.password ? 'Mayúscula, minúscula, número y símbolo (ej. !@#$%)' : undefined}
       />
     </View>
   );

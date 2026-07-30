@@ -2,6 +2,7 @@ import FormInput from '@/components/(auth)/FormInput';
 import PrimaryButton from '@/components/(auth)/PrimaryButton';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import { buscarCliente, ClienteDB } from '@/data/clientesMock';
+import { useBottomInset } from '@/hooks/useBottomInset';
 import { ROL_LABEL, ROLES_ELEGIBLES, SubtipoVerificacion, TipoServicio } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
@@ -233,6 +234,7 @@ function ModalBuscarCliente({
 // ─── Componente principal ───────────────────────────────────────────────────
 
 export default function NuevoServicioScreen() {
+  const bottomInset = useBottomInset();
   const [paso, setPaso] = useState<'tipo' | 'cliente'>('tipo');
   const [tipoSeleccionado, setTipoSeleccionado] = useState<TipoServicio | null>(null);
   const [tipoLegal, setTipoLegal] = useState<TipoGestionLegal | null>(null);
@@ -553,7 +555,7 @@ export default function NuevoServicioScreen() {
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomInset }}>
               <View style={styles.modalHeader}>
                 <View style={[styles.modalIconCircle, { backgroundColor: notif ? `${notif.color}22` : Colors.primaryMuted }]}>
                   <Ionicons name={(notif?.icono ?? 'notifications') as any} size={28} color={notif?.color ?? Colors.primary} />

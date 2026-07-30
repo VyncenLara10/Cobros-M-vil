@@ -6,13 +6,15 @@
 
 import PrimaryButton from '@/components/(auth)/PrimaryButton';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
+import { useBottomInset } from '@/hooks/useBottomInset';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
 export default function RegistroEnviadoScreen() {
+  const bottomInset = useBottomInset();
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: Spacing.xl + bottomInset }]}>
       {/* Ícono de éxito */}
       <View style={styles.iconCircle}>
         <Ionicons name="checkmark-circle" size={64} color={Colors.success} />
@@ -41,7 +43,7 @@ export default function RegistroEnviadoScreen() {
 
       <PrimaryButton
         label="Entendido"
-        onPress={() => router.replace('/(auth)/login')}
+        onPress={() => router.replace('/login')}
         style={styles.boton}
       />
     </View>

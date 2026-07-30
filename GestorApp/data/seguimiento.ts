@@ -119,4 +119,4 @@ export function statsEquipo() {
     completadas, noLocalizado, enCurso, pendientes,
     tasaExito: cerradas ? Math.round((completadas / cerradas) * 100) : 0,
   };
-}
+} 

@@ -6,6 +6,7 @@ import {
   RolGestor,
   Servicio,
   SubtipoVerificacion,
+  TipoServicio,
   rolPuedeAceptar,
 } from '../types';
 
@@ -36,18 +37,17 @@ export const GESTORES_MOCK: Gestor[] = [
     zona: 'Villa Nueva', calificacion: 4.7, serviciosCompletados: 103,
     comisionesAcumuladas: 14200, disponible: true, avatar: 'AG',
   },
+  {
+    id: 'G-100', nombre: 'Carlos Ramírez', telefono: '5599-1000', tipo: 'verificador',
+    zona: 'Guatemala Z.7 / Mixco', calificacion: 4.6, serviciosCompletados: 74,
+    comisionesAcumuladas: 9800, disponible: true, avatar: 'CR',
+  },
 ];
 
-/**
- * Usuario actualmente logueado (el gestor que usa la app).
- * Cambia `tipo` para ver cómo cambian las solicitudes pendientes según el rol.
- * En "Mi perfil" hay un switch de rol para demo.
- */
-export const USUARIO_ACTUAL: Gestor = {
-  id: 'G-100', nombre: 'Carlos Ramírez', telefono: '5599-1000', tipo: 'verificador',
-  zona: 'Guatemala Z.7 / Mixco', calificacion: 4.6, serviciosCompletados: 74,
-  comisionesAcumuladas: 9800, disponible: true, avatar: 'CR',
-};
+/** Gestor por id (perfil + estadísticas). Para el usuario en sesión. */
+export function gestorPorId(id: string): Gestor | undefined {
+  return GESTORES_MOCK.find((g) => g.id === id);
+}
 
 export const SERVICIOS_MOCK: Servicio[] = [
   {
@@ -390,6 +390,40 @@ export function completarParte(
     s.fase = 'en_sitio';
   }
   return { completoTodo };
+}
+
+// ─── Sistema de puntuación de servicios (gamificación del gestor) ───────────
+// Cada servicio suma o resta puntos al gestor según cómo termine. Sirve de
+// base para el ranking de "Top gestores" en Reportes: no es la calificación
+// (estrellas, fija por ahora) sino un puntaje que se recalcula desde el
+// historial real de servicios.
+const PUNTOS_BASE: Record<TipoServicio, number> = {
+  cobro: 10,
+  legal: 8,
+  verificacion: 6,
+  notificacion: 4,
+};
+
+/** Puntos que aporta UN servicio al gestor que lo tiene asignado. */
+export function puntosServicio(s: Servicio): number {
+  if (s.estado === 'completado') {
+    let pts = PUNTOS_BASE[s.tipo];
+    // Cobro: bonus proporcional a cuánto de la deuda se recuperó.
+    if (s.tipo === 'cobro' && s.deudaTotal > 0) {
+      pts += Math.round(Math.min(s.montoGestion / s.deudaTotal, 1) * 10);
+    }
+    return pts;
+  }
+  if (s.estado === 'no_localizado') return -2;
+  if (s.estado === 'fallido') return -5;
+  return 0; // activo / pendiente: aún no puntúa
+}
+
+/** Puntaje total acumulado de un gestor, sumando todos sus servicios cerrados. */
+export function puntosGestor(gestorId: string): number {
+  return SERVICIOS_MOCK
+    .filter((s) => s.gestorId === gestorId)
+    .reduce((acc, s) => acc + puntosServicio(s), 0);
 }
 
 export const RESUMEN_HOY: ResumenDia = {

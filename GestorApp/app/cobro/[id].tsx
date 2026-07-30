@@ -15,6 +15,7 @@ import { ClienteEditableFields, useClienteEditable } from '@/components/servicio
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import { completarServicio, marcarEnSitio, servicioPorId } from '@/data/mocks';
 import { comisionMaxCredito, comisionSobreRecuperado } from '@/types';
+import { useBottomInset } from '@/hooks/useBottomInset';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
@@ -30,6 +31,7 @@ const RESULTADOS: { id: Resultado; label: string; icon: string; color: string }[
 ];
 
 export default function FormularioCobroScreen() {
+  const bottomInset = useBottomInset();
   const { id } = useLocalSearchParams<{ id: string }>();
   const servicio = servicioPorId(id as string);
 
@@ -99,7 +101,7 @@ export default function FormularioCobroScreen() {
   // ══════════════ CANDADO DE UBICACIÓN ══════════════
   if (!enSitio) {
     return (
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: bottomInset }]}>
         <Pressable style={styles.backRow} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={20} color={Colors.primary} />
           <Text style={styles.backText}>Volver</Text>
@@ -144,7 +146,7 @@ export default function FormularioCobroScreen() {
 
   // ══════════════ FORMULARIO DE COBRO ══════════════
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: bottomInset }]}>
       <Pressable style={styles.backRow} onPress={() => router.back()}>
         <Ionicons name="arrow-back" size={20} color={Colors.primary} />
         <Text style={styles.backText}>Guardar y salir</Text>

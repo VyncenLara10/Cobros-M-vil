@@ -115,9 +115,8 @@ export default function PanelServiciosScreen() {
             })}
           </Text>
         </View>
-        <Pressable
-          style={styles.notifBtn}
-          onPress={() => router.push('/modal')}>
+        <Pressable style={styles.notifBtn}>
+          {/* TODO: pantalla de notificaciones. Por ahora no hay lista, solo detalle por id (app/notificacion/[id]). */}
           <Ionicons name="notifications-outline" size={22} color={COLORS.textPrimary} />
           <View style={styles.notifDot} />
         </Pressable>

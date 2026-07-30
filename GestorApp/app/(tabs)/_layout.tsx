@@ -1,8 +1,14 @@
 import { Colors } from '@/constants/DesignTokens';
+import { puedeVer, useSesion } from '@/domain/auth/sesion';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
+  const { usuario } = useSesion();
+  const ver = (ruta: string) => (usuario ? puedeVer(usuario.rol, ruta) : false);
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
@@ -14,8 +20,10 @@ export default function TabLayout() {
           backgroundColor: Colors.surface,
           borderTopColor: Colors.border,
           borderTopWidth: 0.5,
-          height: 60,
-          paddingBottom: 8,
+          // El sistema (barra de gestos/botones de Android) puede tapar la
+          // barra de pestañas si no se le suma su propio inset de abajo.
+          height: 60 + insets.bottom,
+          paddingBottom: 8 + insets.bottom,
           paddingTop: 4,
         },
         tabBarActiveTintColor: Colors.primary,
@@ -53,6 +61,31 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person-outline" size={size} color={color} />
           ),
+          href: ver('mi-perfil') ? undefined : null,
+        }}
+      />
+
+      <Tabs.Screen
+        name="admin"
+        options={{
+          title: 'Seguimiento',
+          headerTitle: 'Seguimiento del equipo',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="navigate-outline" size={size} color={color} />
+          ),
+          href: ver('admin') ? undefined : null,
+        }}
+      />
+
+      <Tabs.Screen
+        name="aprobaciones"
+        options={{
+          title: 'Aprobar',
+          headerTitle: 'Aprobación de gestores',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="shield-checkmark-outline" size={size} color={color} />
+          ),
+          href: ver('aprobaciones') ? undefined : null,
         }}
       />
 
@@ -64,6 +97,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="people-outline" size={size} color={color} />
           ),
+          href: ver('gestores') ? undefined : null,
         }}
       />
 
@@ -75,6 +109,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="bar-chart-outline" size={size} color={color} />
           ),
+          href: ver('reportes') ? undefined : null,
         }}
       />
 

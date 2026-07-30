@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "GestorApp",
-    "slug": "GestorApp",
+    "slug": "gestorapp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -11,14 +11,15 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.tuempresa.cobranzagt",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.GestorApp"
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "bundler": "metro",
@@ -34,10 +35,25 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Usa Face ID para entrar más rápido a GestorApp."
+        }
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c2e04595-4e75-43c5-a2e5-add025ea3240"
+      }
+    },
+    "owner": "vyncenlaras-team"
   }
 }

@@ -19,7 +19,7 @@ export type ViewProps = ThemeProps & DefaultView['props'];
 
 export function useThemeColor(
   props: { light?: string; dark?: string },
-  colorName: keyof typeof COLORS & keyof typeof COLORS.infoMuted
+  colorName: keyof typeof COLORS
 ) {
   const theme = useColorScheme();
   const colorFromProps = props[theme];
@@ -27,6 +27,7 @@ export function useThemeColor(
   if (colorFromProps) {
     return colorFromProps;
   }
+  return COLORS[colorName];
 }
 
 export function Text(props: TextProps) {

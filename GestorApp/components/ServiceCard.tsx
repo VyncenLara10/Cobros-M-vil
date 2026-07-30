@@ -124,7 +124,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surfaceAlt,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: RADIUS.full,
+    borderRadius: RADIUS.pill,
   },
   arrowText: {
     fontSize: 12,

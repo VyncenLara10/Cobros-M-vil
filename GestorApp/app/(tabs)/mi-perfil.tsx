@@ -7,7 +7,8 @@
  *   2) COMPLETAR → en "Mis servicios activos". Solo desde aquí se va al
  *                 formulario, y el formulario exige estar en la ubicación.
  *
- * Incluye un selector de rol (demo) para ver cómo cambia el feed por rol.
+ * La identidad (nombre, rol, zona) viene de la sesión (login); ya no hay un
+ * selector de rol de demo aquí, eso se decide al iniciar sesión.
  */
 
 import { BadgeTipo } from '@/components/UI';
@@ -15,10 +16,14 @@ import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import { CLIENTES_MOCK } from '@/data/clientesMock';
 import {
   aceptarServicio,
+  gestorPorId,
+  puntosGestor,
   serviciosDeGestor,
   serviciosDisponiblesPara,
-  USUARIO_ACTUAL,
 } from '@/data/mocks';
+import { useSesion } from '@/domain/auth/sesion';
+import { notificarLocal } from '@/domain/notificaciones/push';
+import { useBottomInset } from '@/hooks/useBottomInset';
 import {
   comisionMaxCredito,
   comisionMaxTotal,
@@ -33,7 +38,7 @@ import {
 } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -44,11 +49,15 @@ import {
   View,
 } from 'react-native';
 
-const ROLES: RolGestor[] = ['verificador', 'cobrador', 'abogado'];
-
 export default function MiPerfilScreen() {
-  const [rol, setRol] = useState<RolGestor>(USUARIO_ACTUAL.tipo);
-  const [disponible, setDisponible] = useState(USUARIO_ACTUAL.disponible);
+  const { usuario, cerrarSesion } = useSesion();
+  const bottomInset = useBottomInset();
+  // Guardas defensivas: esta pantalla solo es visible para roles de gestor
+  // (el tab se oculta para admin), pero los hooks deben llamarse siempre.
+  const rol: RolGestor = usuario && usuario.rol !== 'admin' ? usuario.rol : 'verificador';
+  const gestor = usuario ? gestorPorId(usuario.id) : undefined;
+
+  const [disponible, setDisponible] = useState(gestor?.disponible ?? true);
   const [seleccion, setSeleccion] = useState<Servicio | null>(null);
   // Fuerza recomputar los feeds tras mutar los mocks (aceptar/completar).
   const [tick, setTick] = useState(0);
@@ -58,7 +67,30 @@ export default function MiPerfilScreen() {
   useFocusEffect(useCallback(() => { setTick((t) => t + 1); }, []));
 
   const pendientes = useMemo(() => serviciosDisponiblesPara(rol), [rol, tick]);
-  const activos = useMemo(() => serviciosDeGestor(USUARIO_ACTUAL.id), [tick]);
+  const activos = useMemo(() => (usuario ? serviciosDeGestor(usuario.id) : []), [usuario, tick]);
+  const puntos = usuario ? puntosGestor(usuario.id) : 0;
+
+  // Notifica cuando aparecen solicitudes nuevas (comparado contra la última
+  // vez que se calculó la lista), no en el primer render.
+  const pendientesPrevias = useRef<number | null>(null);
+  useEffect(() => {
+    const anterior = pendientesPrevias.current;
+    if (anterior !== null && pendientes.length > anterior) {
+      const nuevas = pendientes.length - anterior;
+      notificarLocal(
+        '📋 Nueva solicitud disponible',
+        `Tienes ${nuevas} solicitud${nuevas === 1 ? '' : 'es'} nueva${nuevas === 1 ? '' : 's'} para tu rol.`,
+      );
+    }
+    pendientesPrevias.current = pendientes.length;
+  }, [pendientes.length]);
+
+  const salir = () => {
+    cerrarSesion();
+    router.replace('/login');
+  };
+
+  if (!usuario) return null;
 
   const clienteDB = seleccion?.cliente.clienteId
     ? CLIENTES_MOCK.find((c) => c.id === seleccion.cliente.clienteId)
@@ -66,7 +98,7 @@ export default function MiPerfilScreen() {
 
   // ── ACEPTAR: asigna y cierra. NO abre formulario. ──
   const aceptar = (s: Servicio) => {
-    aceptarServicio(s.id, USUARIO_ACTUAL.id, USUARIO_ACTUAL.nombre);
+    aceptarServicio(s.id, usuario.id, usuario.nombre);
     setSeleccion(null);
     refrescar();
     Alert.alert(
@@ -96,17 +128,17 @@ export default function MiPerfilScreen() {
       <View style={styles.perfilCard}>
         <View style={styles.perfilTop}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{USUARIO_ACTUAL.avatar}</Text>
+            <Text style={styles.avatarText}>{usuario.avatar}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.perfilNombre}>{USUARIO_ACTUAL.nombre}</Text>
+            <Text style={styles.perfilNombre}>{usuario.nombre}</Text>
             <View style={styles.perfilRolRow}>
               <View style={styles.rolBadge}>
                 <Text style={styles.rolBadgeText}>{ROL_LABEL[rol]}</Text>
               </View>
-              <Text style={styles.perfilRating}>★ {USUARIO_ACTUAL.calificacion.toFixed(1)}</Text>
+              <Text style={styles.perfilRating}>★ {(gestor?.calificacion ?? 0).toFixed(1)}</Text>
             </View>
-            <Text style={styles.perfilZona}>📍 {USUARIO_ACTUAL.zona}</Text>
+            <Text style={styles.perfilZona}>📍 {usuario.zona}</Text>
           </View>
           <Pressable
             style={[styles.dispChip, disponible ? styles.dispOn : styles.dispOff]}
@@ -121,7 +153,12 @@ export default function MiPerfilScreen() {
 
         <View style={styles.statsRow}>
           <View style={styles.stat}>
-            <Text style={styles.statValue}>{USUARIO_ACTUAL.serviciosCompletados}</Text>
+            <Text style={[styles.statValue, { color: Colors.primary }]}>{puntos}</Text>
+            <Text style={styles.statLabel}>Puntos</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.stat}>
+            <Text style={styles.statValue}>{gestor?.serviciosCompletados ?? 0}</Text>
             <Text style={styles.statLabel}>Completados</Text>
           </View>
           <View style={styles.statDivider} />
@@ -135,19 +172,11 @@ export default function MiPerfilScreen() {
             <Text style={styles.statLabel}>Disponibles</Text>
           </View>
         </View>
-      </View>
 
-      {/* ── Selector de rol (demo) ── */}
-      <Text style={styles.demoLabel}>Ver como (demo)</Text>
-      <View style={styles.rolesRow}>
-        {ROLES.map((r) => {
-          const activo = rol === r;
-          return (
-            <Pressable key={r} style={[styles.rolPill, activo && styles.rolPillActivo]} onPress={() => setRol(r)}>
-              <Text style={[styles.rolPillText, activo && styles.rolPillTextActivo]}>{ROL_LABEL[r]}</Text>
-            </Pressable>
-          );
-        })}
+        <Pressable style={styles.salirBtn} onPress={salir}>
+          <Ionicons name="log-out-outline" size={15} color={Colors.danger} />
+          <Text style={styles.salirText}>Cerrar sesión</Text>
+        </Pressable>
       </View>
 
       {/* ══ MIS SERVICIOS ACTIVOS (ya aceptados → completar) ══ */}
@@ -248,7 +277,7 @@ export default function MiPerfilScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             {seleccion && (
-              <ScrollView showsVerticalScrollIndicator={false}>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomInset }}>
                 <View style={styles.modalHeader}>
                   <BadgeTipo tipo={seleccion.tipo} />
                   <Pressable onPress={() => setSeleccion(null)} hitSlop={10}>
@@ -441,12 +470,8 @@ const styles = StyleSheet.create({
   statLabel: { ...Typography.micro, color: Colors.textSecondary, marginTop: 2, textTransform: 'none', letterSpacing: 0 },
   statDivider: { width: 0.5, height: 32, backgroundColor: Colors.border },
 
-  demoLabel: { ...Typography.micro, color: Colors.textMuted, letterSpacing: 0.6, marginBottom: Spacing.sm },
-  rolesRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.xl },
-  rolPill: { flex: 1, alignItems: 'center', paddingVertical: Spacing.sm, borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.surface },
-  rolPillActivo: { borderColor: Colors.primary, backgroundColor: Colors.primary },
-  rolPillText: { ...Typography.caption, color: Colors.textSecondary, fontWeight: '600' },
-  rolPillTextActivo: { color: '#fff', fontWeight: '700' },
+  salirBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: Spacing.md, paddingVertical: Spacing.sm },
+  salirText: { ...Typography.caption, color: Colors.danger, fontWeight: '600' },
 
   sectionTitle: { ...Typography.subtitle, color: Colors.textPrimary, fontWeight: '700', marginBottom: 2 },
   sectionSub: { ...Typography.caption, color: Colors.textSecondary, marginBottom: Spacing.lg },
