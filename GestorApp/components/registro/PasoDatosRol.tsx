@@ -2,6 +2,7 @@ import DocumentUploader from '@/components/(auth)/Documentuploader';
 import FormInput from '@/components/(auth)/FormInput';
 import { DatosRegistro } from '@/components/(auth)/tipos-registro';
 import { Colors, Spacing, Typography } from '@/constants/DesignTokens';
+import { soloDigitos, textoSeguro } from '@/domain/validators';
 import { StyleSheet, Text, View } from 'react-native';
 
 interface PasoDatosRolProps {
@@ -33,8 +34,9 @@ export default function PasoDatosRol({
           placeholder="00000"
           required
           keyboardType="number-pad"
+          maxLength={8}
           value={datos.numeroColegiado}
-          onChangeText={(t) => onCambiarCampo('numeroColegiado', t)}
+          onChangeText={(t) => onCambiarCampo('numeroColegiado', soloDigitos(t))}
           error={errores.numeroColegiado}
         />
 
@@ -60,8 +62,9 @@ export default function PasoDatosRol({
         label="Tipo de vehiculo"
         placeholder="Moto, carro u otro"
         required
+        maxLength={40}
         value={datos.tipoVehiculo}
-        onChangeText={(t) => onCambiarCampo('tipoVehiculo', t)}
+        onChangeText={(t) => onCambiarCampo('tipoVehiculo', textoSeguro(t))}
         error={errores.tipoVehiculo}
       />
 
@@ -70,8 +73,9 @@ export default function PasoDatosRol({
         placeholder="P 000AAA"
         required
         autoCapitalize="characters"
+        maxLength={10}
         value={datos.placaVehiculo}
-        onChangeText={(t) => onCambiarCampo('placaVehiculo', t)}
+        onChangeText={(t) => onCambiarCampo('placaVehiculo', textoSeguro(t).toUpperCase())}
         error={errores.placaVehiculo}
       />
 

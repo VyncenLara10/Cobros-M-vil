@@ -2,6 +2,7 @@ import DocumentUploader from '@/components/(auth)/Documentuploader';
 import FormInput from '@/components/(auth)/FormInput';
 import { DatosRegistro } from '@/components/(auth)/tipos-registro';
 import { Colors, Spacing, Typography } from '@/constants/DesignTokens';
+import { MAX, soloDigitos, soloLetras } from '@/domain/validators';
 import { StyleSheet, Text, View } from 'react-native';
 
 interface PasoDatosPersonalesProps {
@@ -33,8 +34,9 @@ export default function PasoDatosPersonales({
         label="Nombre completo"
         placeholder="Como aparece en tu DPI"
         required
+        maxLength={MAX.nombre}
         value={datos.nombreCompleto}
-        onChangeText={(t) => onCambiarCampo('nombreCompleto', t)}
+        onChangeText={(t) => onCambiarCampo('nombreCompleto', soloLetras(t))}
         error={errores.nombreCompleto}
       />
 
@@ -43,8 +45,9 @@ export default function PasoDatosPersonales({
         placeholder="0000 00000 0000"
         required
         keyboardType="number-pad"
+        maxLength={13}
         value={datos.dpiNumero}
-        onChangeText={(t) => onCambiarCampo('dpiNumero', t)}
+        onChangeText={(t) => onCambiarCampo('dpiNumero', soloDigitos(t))}
         error={errores.dpiNumero}
       />
 
@@ -54,18 +57,20 @@ export default function PasoDatosPersonales({
         required
         keyboardType="email-address"
         autoCapitalize="none"
+        maxLength={MAX.email}
         value={datos.correo}
-        onChangeText={(t) => onCambiarCampo('correo', t)}
+        onChangeText={(t) => onCambiarCampo('correo', t.trim())}
         error={errores.correo}
       />
 
       <FormInput
         label="Telefono"
-        placeholder="0000-0000"
+        placeholder="00000000"
         required
         keyboardType="phone-pad"
+        maxLength={8}
         value={datos.telefono}
-        onChangeText={(t) => onCambiarCampo('telefono', t)}
+        onChangeText={(t) => onCambiarCampo('telefono', soloDigitos(t))}
         error={errores.telefono}
       />
 
@@ -74,6 +79,7 @@ export default function PasoDatosPersonales({
         placeholder="Minimo 8 caracteres"
         required
         secureTextEntry
+        maxLength={72}
         value={datos.password}
         onChangeText={(t) => onCambiarCampo('password', t)}
         error={errores.password}

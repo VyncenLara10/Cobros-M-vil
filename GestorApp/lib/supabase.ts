@@ -29,15 +29,35 @@ if (!supabaseConfigurado) {
   );
 }
 
+/**
+ * `expo start --web` (y `expo export` para web) renderizan un primer pase en
+ * Node (SSR/SSG) antes de que exista un navegador real. Ahí NO existe
+ * `window`, así que AsyncStorage (que en web usa localStorage) truena si el
+ * cliente de Supabase intenta leer la sesión guardada durante ese pase.
+ * Por eso: en el servidor usamos un storage que no hace nada; en el
+ * navegador o en nativo (iOS/Android) usamos AsyncStorage de verdad.
+ */
+const enServidor = typeof window === 'undefined';
+
+const storageSinEfecto = {
+  getItem: async () => null,
+  setItem: async () => {},
+  removeItem: async () => {},
+};
+
 export const supabase = createClient(
   url || 'https://placeholder.supabase.co',
   anonKey || 'placeholder-anon-key',
   {
     auth: {
-      storage: AsyncStorage,
-      autoRefreshToken: true,
-      persistSession: true,
+      storage: enServidor ? storageSinEfecto : AsyncStorage,
+      autoRefreshToken: !enServidor,
+      persistSession: !enServidor,
       detectSessionInUrl: false,
+      // PKCE: el enlace mágico llega con "?code=..." en vez de un token en el
+      // fragmento de la URL. Es más fácil de manejar igual en web y en
+      // nativo, y es lo recomendado por Supabase para apps móviles.
+      flowType: 'pkce',
     },
   },
 );

@@ -32,6 +32,16 @@ export default function RootLayout() {
             headerShadowVisible: false,
           }}
         />
+        <Stack.Screen
+          name="seguridad"
+          options={{
+            headerShown: true,
+            headerTitle: 'Seguridad',
+            headerStyle: { backgroundColor: Colors.surface },
+            headerTintColor: Colors.textPrimary,
+            headerShadowVisible: false,
+          }}
+        />
         <Stack.Screen name="+not-found" />
       </Stack>
     </SesionProvider>

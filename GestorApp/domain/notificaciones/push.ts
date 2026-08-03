@@ -17,14 +17,22 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// En `expo start --web`, Expo Router hace un primer render en Node (SSR)
+// donde no existe `window`/`localStorage`. La implementación web de
+// expo-notifications sí los necesita, así que este handler solo se registra
+// cuando estamos de verdad en un navegador (o en nativo, donde no aplica).
+const puedeUsarNotificaciones = Platform.OS !== 'web' || typeof window !== 'undefined';
+
+if (puedeUsarNotificaciones) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 /**
  * Pide permiso y obtiene el Expo Push Token del dispositivo. Se llama al

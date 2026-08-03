@@ -12,8 +12,10 @@ import PasoZonaCobertura from '@/components/registro/PasoZonaCobertura';
 import Progress from '@/components/registro/Progress';
 import { Colors, Spacing, Typography } from '@/constants/DesignTokens';
 import { enviarSolicitudRegistro } from '@/data/solicitudesRegistro';
-import { validarPassword } from '@/domain/validators';
+import { enviarRegistroReal } from '@/domain/auth/registro';
+import { validarColegiado, validarDPI, validarEmail, validarNombre, validarNumeroCuenta, validarPassword, validarPlaca, validarTelefono } from '@/domain/validators';
 import { useBottomInset } from '@/hooks/useBottomInset';
+import { supabaseConfigurado } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
@@ -57,25 +59,32 @@ export default function RegistroScreen() {
         }
         break;
 
-      case 2:
-        // ✅ FIX: campos correctos según DatosRegistro real
-        if (!datos.nombreCompleto.trim()) e.nombreCompleto = 'El nombre es obligatorio';
-        if (!datos.dpiNumero.trim()) e.dpiNumero = 'El DPI es obligatorio';
-        if (!datos.correo.trim()) e.correo = 'El correo es obligatorio';
-        if (!datos.telefono.trim()) e.telefono = 'El teléfono es obligatorio';
-        {
-          const r = validarPassword(datos.password, { correo: datos.correo });
-          if (!r.ok) e.password = r.error;
-        }
+      case 2: {
+        const rNombre = validarNombre(datos.nombreCompleto, 'El nombre completo');
+        if (!rNombre.ok) e.nombreCompleto = rNombre.error;
+
+        const rDpi = validarDPI(datos.dpiNumero);
+        if (!rDpi.ok) e.dpiNumero = rDpi.error;
+
+        const rCorreo = validarEmail(datos.correo, true);
+        if (!rCorreo.ok) e.correo = rCorreo.error;
+
+        const rTelefono = validarTelefono(datos.telefono);
+        if (!rTelefono.ok) e.telefono = rTelefono.error;
+
+        const rPassword = validarPassword(datos.password, { correo: datos.correo });
+        if (!rPassword.ok) e.password = rPassword.error;
         break;
+      }
 
       case 3:
-        // ✅ FIX: campos de rol correctos
         if (datos.rol === 'abogado') {
-          if (!datos.numeroColegiado.trim()) e.numeroColegiado = 'El número de colegiado es obligatorio';
+          const rColegiado = validarColegiado(datos.numeroColegiado);
+          if (!rColegiado.ok) e.numeroColegiado = rColegiado.error;
         } else {
           if (!datos.tipoVehiculo.trim()) e.tipoVehiculo = 'El tipo de vehículo es obligatorio';
-          if (!datos.placaVehiculo.trim()) e.placaVehiculo = 'La placa es obligatoria';
+          const rPlaca = validarPlaca(datos.placaVehiculo);
+          if (!rPlaca.ok) e.placaVehiculo = rPlaca.error;
         }
         break;
 
@@ -94,12 +103,14 @@ export default function RegistroScreen() {
         }
         break;
 
-      case 6:
-        // ✅ FIX: campo correcto es nombreTitular, no nombreCuenta
+      case 6: {
         if (!datos.banco.trim()) e.banco = 'Selecciona tu banco';
-        if (!datos.numeroCuenta.trim()) e.numeroCuenta = 'El número de cuenta es obligatorio';
-        if (!datos.nombreTitular.trim()) e.nombreTitular = 'El nombre del titular es obligatorio';
+        const rCuenta = validarNumeroCuenta(datos.numeroCuenta);
+        if (!rCuenta.ok) e.numeroCuenta = rCuenta.error;
+        const rTitular = validarNombre(datos.nombreTitular, 'El nombre del titular');
+        if (!rTitular.ok) e.nombreTitular = rTitular.error;
         break;
+      }
 
       case 7:
         // ✅ FIX: campo correcto es acuerdoAceptado, no aceptaTerminos
@@ -126,9 +137,21 @@ export default function RegistroScreen() {
     else enviarRegistro();
   };
 
-  const enviarRegistro = () => {
+  const enviarRegistro = async () => {
     setEnviando(true);
-    // TODO: await fetch('/api/gestores/registro', { method: 'POST', body: JSON.stringify(datos) })
+
+    if (supabaseConfigurado) {
+      const r = await enviarRegistroReal(datos);
+      setEnviando(false);
+      if (!r.ok) {
+        Alert.alert('No se pudo enviar la solicitud', r.error ?? 'Intenta de nuevo.');
+        return;
+      }
+      router.replace('/(auth)/registro-enviado');
+      return;
+    }
+
+    // Sin Supabase configurado: queda el flujo de demo en memoria.
     setTimeout(() => {
       enviarSolicitudRegistro(datos);
       setEnviando(false);

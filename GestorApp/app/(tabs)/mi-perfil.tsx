@@ -173,6 +173,11 @@ export default function MiPerfilScreen() {
           </View>
         </View>
 
+        <Pressable style={styles.salirBtn} onPress={() => router.push('/seguridad')}>
+          <Ionicons name="shield-checkmark-outline" size={15} color={Colors.primary} />
+          <Text style={[styles.salirText, { color: Colors.primary }]}>Seguridad (verificación en dos pasos y biometría)</Text>
+        </Pressable>
+
         <Pressable style={styles.salirBtn} onPress={salir}>
           <Ionicons name="log-out-outline" size={15} color={Colors.danger} />
           <Text style={styles.salirText}>Cerrar sesión</Text>

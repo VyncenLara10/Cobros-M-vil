@@ -286,3 +286,25 @@ create policy "mis notificaciones" on public.notificaciones
 
 create policy "mis push tokens" on public.push_tokens
   for all using (perfil_id = auth.uid());
+
+-- ============================================================================
+-- Storage: bucket "documentos"
+-- ============================================================================
+-- 1. Crea el bucket manualmente: Storage → New bucket → nombre "documentos",
+--    marcado como PRIVADO (no público).
+-- 2. Corre las políticas de abajo (SQL Editor → Run) para que cada candidato
+--    pueda subir y leer SOLO los archivos dentro de su propia carpeta
+--    (documentos/<su-user-id>/...), que es como los sube domain/auth/registro.ts.
+
+create policy "subir mis documentos" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'documentos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "ver mis documentos" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'documentos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Nota: para que el ADMIN pueda ver los documentos de otros al revisar una
+-- solicitud (app/(tabs)/aprobaciones.tsx), falta una política adicional que
+-- compruebe el rol admin, por ejemplo con una función is_admin(uid) que lea
+-- public.perfiles. Se deja pendiente para cuando conectes esa pantalla.

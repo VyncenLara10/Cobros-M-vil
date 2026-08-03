@@ -214,6 +214,22 @@ export function validarColegiado(valor: string, obligatorio = true): Resultado {
   return OK;
 }
 
+/** Número de cuenta bancaria: solo dígitos, 4–20 caracteres. */
+export function validarNumeroCuenta(valor: string, obligatorio = true): Resultado {
+  const v = soloDigitos(valor);
+  if (!v) return obligatorio ? fail('El número de cuenta es obligatorio') : OK;
+  if (v.length < 4 || v.length > 20) return fail('Número de cuenta inválido (4 a 20 dígitos)');
+  return OK;
+}
+
+/** Placa de vehículo (Guatemala): letras, números y guion, 5–10 caracteres. */
+export function validarPlaca(valor: string, obligatorio = true): Resultado {
+  const v = valor.trim().toUpperCase();
+  if (!v) return obligatorio ? fail('La placa es obligatoria') : OK;
+  if (!/^[A-Z0-9\s-]{5,10}$/.test(v)) return fail('Placa inválida');
+  return OK;
+}
+
 /**
  * Valida un objeto completo contra un mapa de reglas.
  * Devuelve { valido, errores } para pintar directo en los FormInput.

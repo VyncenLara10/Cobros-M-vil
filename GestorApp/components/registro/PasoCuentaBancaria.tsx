@@ -1,6 +1,7 @@
 import FormInput from '@/components/(auth)/FormInput';
 import { DatosRegistro } from '@/components/(auth)/tipos-registro';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
+import { soloDigitos, soloLetras, textoSeguro } from '@/domain/validators';
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -34,8 +35,9 @@ export default function PasoCuentaBancaria({
         label="Banco"
         placeholder="Nombre del banco"
         required
+        maxLength={60}
         value={datos.banco}
-        onChangeText={(t) => onCambiarCampo('banco', t)}
+        onChangeText={(t) => onCambiarCampo('banco', textoSeguro(t))}
         error={errores.banco}
       />
 
@@ -43,8 +45,9 @@ export default function PasoCuentaBancaria({
         label="Tipo de cuenta"
         placeholder="Monetaria o ahorro"
         required
+        maxLength={30}
         value={datos.tipoCuenta}
-        onChangeText={(t) => onCambiarCampo('tipoCuenta', t)}
+        onChangeText={(t) => onCambiarCampo('tipoCuenta', textoSeguro(t))}
         error={errores.tipoCuenta}
       />
 
@@ -53,8 +56,9 @@ export default function PasoCuentaBancaria({
         placeholder="0000000000"
         required
         keyboardType="number-pad"
+        maxLength={20}
         value={datos.numeroCuenta}
-        onChangeText={(t) => onCambiarCampo('numeroCuenta', t)}
+        onChangeText={(t) => onCambiarCampo('numeroCuenta', soloDigitos(t))}
         error={errores.numeroCuenta}
       />
 
@@ -62,8 +66,9 @@ export default function PasoCuentaBancaria({
         label="Nombre del titular"
         placeholder="Como aparece en la cuenta bancaria"
         required
+        maxLength={60}
         value={datos.nombreTitular}
-        onChangeText={(t) => onCambiarCampo('nombreTitular', t)}
+        onChangeText={(t) => onCambiarCampo('nombreTitular', soloLetras(t))}
         error={errores.nombreTitular}
       />
     </View>
