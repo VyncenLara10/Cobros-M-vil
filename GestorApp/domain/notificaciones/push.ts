@@ -42,22 +42,27 @@ if (puedeUsarNotificaciones) {
 export async function registrarPushToken(): Promise<string | null> {
   if (Platform.OS === 'web' || !Device.isDevice) return null;
 
-  const permisos = await Notifications.getPermissionsAsync();
-  let estado = permisos.status;
-  if (estado !== 'granted') {
-    const pedido = await Notifications.requestPermissionsAsync();
-    estado = pedido.status;
-  }
-  if (estado !== 'granted') return null;
-
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'GestorApp',
-      importance: Notifications.AndroidImportance.DEFAULT,
-    });
-  }
-
+  // Todo el flujo va en un único try/catch: cualquier paso (permisos, canal
+  // de Android, token) puede fallar la primera vez que corre en un build
+  // nuevo (p. ej. si Firebase/FCM todavía no está configurado para push
+  // remoto) y no debe mostrarse como error al usuario — es un plus, nunca
+  // debe interrumpir el login.
   try {
+    const permisos = await Notifications.getPermissionsAsync();
+    let estado = permisos.status;
+    if (estado !== 'granted') {
+      const pedido = await Notifications.requestPermissionsAsync();
+      estado = pedido.status;
+    }
+    if (estado !== 'granted') return null;
+
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'GestorApp',
+        importance: Notifications.AndroidImportance.DEFAULT,
+      });
+    }
+
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
     const { data: token } = await Notifications.getExpoPushTokenAsync(
       projectId ? { projectId } : undefined,
@@ -65,7 +70,7 @@ export async function registrarPushToken(): Promise<string | null> {
     // TODO: await supabase.from('push_tokens').upsert({ perfil_id, expo_push_token: token, plataforma: Platform.OS })
     return token;
   } catch {
-    return null; // sin red o sin credenciales push configuradas: no bloquea el login
+    return null; // sin red, sin credenciales push configuradas, o permiso denegado: no bloquea el login
   }
 }
 

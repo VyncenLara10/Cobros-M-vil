@@ -85,6 +85,7 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
 
   // 3) Solicitud de registro (cola de aprobación del admin).
   const { error: errorSolicitud } = await supabase.from('solicitudes_registro').insert({
+    perfil_id: userId,
     rol: datos.rol,
     nombre_completo: datos.nombreCompleto,
     correo: datos.correo.trim(),

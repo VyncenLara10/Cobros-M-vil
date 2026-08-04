@@ -2,24 +2,29 @@
  * app/(tabs)/aprobaciones.tsx
  * Cola de aprobación de gestores nuevos (solo admin). Se revisa la papelería
  * (DPI, licencia, antecedentes...) y se aprueba o rechaza la solicitud.
- * Al aprobar, el gestor queda activo en GESTORES_MOCK (ver
- * data/solicitudesRegistro.ts). Prototipo con datos en memoria.
+ * Si Supabase está configurado, lee/escribe la tabla real
+ * public.solicitudes_registro (ver domain/aprobaciones/aprobaciones.ts).
+ * Si NO está configurado, cae al modo demo con datos en memoria
+ * (data/solicitudesRegistro.ts), igual que el resto de la app.
  */
 
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import {
   aprobarSolicitud,
   rechazarSolicitud,
-  SolicitudRegistro,
   SOLICITUDES_REGISTRO,
+  SolicitudRegistro,
 } from '@/data/solicitudesRegistro';
+import { aprobarSolicitudReal, cargarSolicitudesReales, rechazarSolicitudReal } from '@/domain/aprobaciones/aprobaciones';
+import { useSesion } from '@/domain/auth/sesion';
 import { notificarLocal } from '@/domain/notificaciones/push';
 import { useBottomInset } from '@/hooks/useBottomInset';
+import { supabaseConfigurado } from '@/lib/supabase';
 import { ROL_LABEL } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const DOCS: { key: keyof SolicitudRegistro['documentos']; label: string }[] = [
@@ -35,16 +40,33 @@ const DOCS: { key: keyof SolicitudRegistro['documentos']; label: string }[] = [
 export default function AprobacionesScreen() {
   const bottomInset = useBottomInset();
   const insets = useSafeAreaInsets();
-  const [tick, setTick] = useState(0);
+  const { usuario } = useSesion();
+
+  const [solicitudes, setSolicitudes] = useState<SolicitudRegistro[]>(
+    supabaseConfigurado ? [] : SOLICITUDES_REGISTRO,
+  );
+  const [cargando, setCargando] = useState(supabaseConfigurado);
+  const [procesando, setProcesando] = useState(false);
   const [seleccion, setSeleccion] = useState<SolicitudRegistro | null>(null);
   const [motivoRechazo, setMotivoRechazo] = useState('');
   const [mostrarRechazo, setMostrarRechazo] = useState(false);
   const [imagenAmpliada, setImagenAmpliada] = useState<string | null>(null);
 
-  useFocusEffect(useCallback(() => { setTick((t) => t + 1); }, []));
+  const recargar = useCallback(async () => {
+    if (!supabaseConfigurado) {
+      setSolicitudes([...SOLICITUDES_REGISTRO]);
+      return;
+    }
+    setCargando(true);
+    const datos = await cargarSolicitudesReales();
+    setSolicitudes(datos);
+    setCargando(false);
+  }, []);
 
-  const pendientes = SOLICITUDES_REGISTRO.filter((s) => s.estado === 'pendiente');
-  const resueltas = SOLICITUDES_REGISTRO.filter((s) => s.estado !== 'pendiente').slice(0, 5);
+  useFocusEffect(useCallback(() => { recargar(); }, [recargar]));
+
+  const pendientes = solicitudes.filter((s) => s.estado === 'pendiente');
+  const resueltas = solicitudes.filter((s) => s.estado !== 'pendiente').slice(0, 5);
 
   const cerrarModal = () => {
     setSeleccion(null);
@@ -52,31 +74,71 @@ export default function AprobacionesScreen() {
     setMotivoRechazo('');
   };
 
-  const aprobar = (s: SolicitudRegistro) => {
+  const aprobar = async (s: SolicitudRegistro) => {
+    if (supabaseConfigurado) {
+      if (!usuario) return;
+      setProcesando(true);
+      const r = await aprobarSolicitudReal(s, usuario.id);
+      setProcesando(false);
+      if (!r.ok) {
+        Alert.alert('No se pudo aprobar', r.error ?? 'Intenta de nuevo.');
+        return;
+      }
+      cerrarModal();
+      await recargar();
+      Alert.alert('✅ Solicitud aprobada', `${s.nombreCompleto} ya puede iniciar sesión.`);
+      // NOTA: esta notificación local es una demo en ESTE dispositivo (el del
+      // admin). Para que el push llegue al TELÉFONO DEL CANDIDATO hace falta
+      // una Edge Function que lea su push_token (ver supabase/schema.sql).
+      notificarLocal('✅ Cuenta aprobada', `${s.nombreCompleto} ya puede recibir servicios como ${ROL_LABEL[s.rol]}.`);
+      return;
+    }
+
+    // Modo demo (sin Supabase configurado)
     const gestor = aprobarSolicitud(s.id);
     cerrarModal();
-    setTick((t) => t + 1);
+    await recargar();
     Alert.alert(
       '✅ Solicitud aprobada',
-      `${s.nombreCompleto} ya es un gestor activo${gestor ? ` (${gestor.id})` : ''}.\n\nSe le notifica que su cuenta fue aprobada.`,
+      `${s.nombreCompleto} ya es un gestor activo${gestor ? ` (${gestor.id})` : ''}.`,
     );
-    // NOTA: esta notificación local es una demo en ESTE dispositivo (el del
-    // admin). Con backend real, el push llega al TELÉFONO DEL CANDIDATO vía
-    // su propio push_token (ver supabase/schema.sql), no al del admin.
     notificarLocal('✅ Cuenta aprobada', `${s.nombreCompleto} ya puede recibir servicios como ${ROL_LABEL[s.rol]}.`);
   };
 
-  const confirmarRechazo = (s: SolicitudRegistro) => {
+  const confirmarRechazo = async (s: SolicitudRegistro) => {
     if (!motivoRechazo.trim()) {
       Alert.alert('Falta el motivo', 'Indica por qué se rechaza, para que el candidato pueda corregirlo.');
       return;
     }
+
+    if (supabaseConfigurado) {
+      if (!usuario) return;
+      setProcesando(true);
+      const r = await rechazarSolicitudReal(s, motivoRechazo, usuario.id);
+      setProcesando(false);
+      if (!r.ok) {
+        Alert.alert('No se pudo rechazar', r.error ?? 'Intenta de nuevo.');
+        return;
+      }
+      cerrarModal();
+      await recargar();
+      Alert.alert('Solicitud rechazada', 'Se le notifica al candidato con el motivo.');
+      return;
+    }
+
     rechazarSolicitud(s.id, motivoRechazo);
     cerrarModal();
-    setTick((t) => t + 1);
+    await recargar();
     Alert.alert('Solicitud rechazada', 'Se le notifica al candidato con el motivo.');
-    // TODO: notificación push/correo con el motivo de rechazo
   };
+
+  if (cargando) {
+    return (
+      <View style={[styles.screen, styles.cargandoBox]}>
+        <ActivityIndicator color={Colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: bottomInset + 32 }]}>
@@ -200,28 +262,27 @@ export default function AprobacionesScreen() {
                       <Ionicons name="information-circle-outline" size={15} color={Colors.textSecondary} />
                       <Text style={styles.motivoAyuda}>Explica qué falta o qué está mal, para que el candidato pueda corregirlo y volver a enviar.</Text>
                     </View>
-                    {/* Reutiliza FormInput sería ideal, pero mantenemos el modal ligero */}
                     <ScrollView horizontal={false}>
                       <TextEntry value={motivoRechazo} onChangeText={setMotivoRechazo} />
                     </ScrollView>
                     <View style={styles.accionesRow}>
-                      <Pressable style={styles.btnSecundario} onPress={() => setMostrarRechazo(false)}>
+                      <Pressable style={styles.btnSecundario} onPress={() => setMostrarRechazo(false)} disabled={procesando}>
                         <Text style={styles.btnSecundarioText}>Atrás</Text>
                       </Pressable>
-                      <Pressable style={styles.btnRechazar} onPress={() => confirmarRechazo(seleccion)}>
-                        <Ionicons name="close-circle-outline" size={18} color="#fff" />
+                      <Pressable style={styles.btnRechazar} onPress={() => confirmarRechazo(seleccion)} disabled={procesando}>
+                        {procesando ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="close-circle-outline" size={18} color="#fff" />}
                         <Text style={styles.btnRechazarText}>Confirmar rechazo</Text>
                       </Pressable>
                     </View>
                   </>
                 ) : (
                   <View style={styles.accionesRow}>
-                    <Pressable style={styles.btnSecundario} onPress={() => setMostrarRechazo(true)}>
+                    <Pressable style={styles.btnSecundario} onPress={() => setMostrarRechazo(true)} disabled={procesando}>
                       <Ionicons name="close-circle-outline" size={18} color={Colors.danger} />
                       <Text style={[styles.btnSecundarioText, { color: Colors.danger }]}>Rechazar</Text>
                     </Pressable>
-                    <Pressable style={styles.btnAprobar} onPress={() => aprobar(seleccion)}>
-                      <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                    <Pressable style={styles.btnAprobar} onPress={() => aprobar(seleccion)} disabled={procesando}>
+                      {procesando ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />}
                       <Text style={styles.btnAprobarText}>Aprobar gestor</Text>
                     </Pressable>
                   </View>
@@ -254,7 +315,6 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-// Input mínimo para el motivo de rechazo (sin depender de FormInput, que exige label fijo).
 function TextEntry({ value, onChangeText }: { value: string; onChangeText: (t: string) => void }) {
   return (
     <TextInput
@@ -270,6 +330,7 @@ function TextEntry({ value, onChangeText }: { value: string; onChangeText: (t: s
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
+  cargandoBox: { alignItems: 'center', justifyContent: 'center' },
   content: { padding: Spacing.lg },
   headerSub: { ...Typography.caption, color: Colors.textSecondary, marginBottom: Spacing.lg },
 

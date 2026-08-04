@@ -42,6 +42,7 @@ export interface SolicitudRegistro {
     carneColegiadoUri: string | null;
   };
   motivoRechazo?: string;
+  perfilId?: string;
 }
 
 let contador = 3;
