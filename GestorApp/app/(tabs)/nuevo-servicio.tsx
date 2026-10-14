@@ -1,12 +1,14 @@
 import FormInput from '@/components/(auth)/FormInput';
 import PrimaryButton from '@/components/(auth)/PrimaryButton';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
-import { buscarCliente, ClienteDB } from '@/data/clientesMock';
+import { buscarClienteDB, ClienteBusqueda, crearServicio } from '@/domain/servicios/servicios';
 import { useBottomInset } from '@/hooks/useBottomInset';
 import { ROL_LABEL, ROLES_ELEGIBLES, SubtipoVerificacion, TipoServicio } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import * as Location from 'expo-location';
+import { useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Modal,
@@ -158,15 +160,24 @@ function ModalBuscarCliente({
 }: {
   visible: boolean;
   onCerrar: () => void;
-  onSeleccionar: (cliente: ClienteDB) => void;
+  onSeleccionar: (cliente: ClienteBusqueda) => void;
 }) {
   const [query, setQuery] = useState('');
   const [buscado, setBuscado] = useState(false);
-  const resultados = useMemo(() => (buscado ? buscarCliente(query) : []), [query, buscado]);
+  const [buscando, setBuscando] = useState(false);
+  const [resultados, setResultados] = useState<ClienteBusqueda[]>([]);
 
-  const ejecutarBusqueda = () => {
+  const ejecutarBusqueda = async () => {
+    if (query.trim().length < 3) {
+      setResultados([]);
+      setBuscado(true);
+      return;
+    }
+    setBuscando(true);
+    const r = await buscarClienteDB(query);
+    setResultados(r);
     setBuscado(true);
-    // TODO: reemplazar por await fetch(`/api/clientes?q=${query}`)
+    setBuscando(false);
   };
 
   return (
@@ -179,26 +190,26 @@ function ModalBuscarCliente({
               <Ionicons name="close" size={24} color={Colors.textSecondary} />
             </Pressable>
           </View>
-          <Text style={styles.buscarSub}>Busca por ID interno, DPI o nombre en la base de datos.</Text>
+          <Text style={styles.buscarSub}>Busca por DPI o nombre en la base de datos.</Text>
 
           <View style={styles.buscarRow}>
             <TextInput
               style={styles.buscarInput}
-              placeholder="Ej: CLI-001, 1234567890101, Carlos…"
+              placeholder="Ej: 1234567890101, Carlos…"
               placeholderTextColor={Colors.textMuted}
               value={query}
-              onChangeText={(t) => { setQuery(t); setBuscado(false); }}
+              onChangeText={(t) => { setQuery(t); setBuscado(false); setResultados([]); }}
               autoCapitalize="none"
               onSubmitEditing={ejecutarBusqueda}
               returnKeyType="search"
             />
             <Pressable style={styles.buscarBtn} onPress={ejecutarBusqueda}>
-              <Ionicons name="search" size={20} color="#fff" />
+              {buscando ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="search" size={20} color="#fff" />}
             </Pressable>
           </View>
 
           <ScrollView style={styles.buscarResultados} keyboardShouldPersistTaps="handled">
-            {buscado && resultados.length === 0 && (
+            {buscado && !buscando && resultados.length === 0 && (
               <View style={styles.buscarVacio}>
                 <Ionicons name="person-outline" size={32} color={Colors.textMuted} />
                 <Text style={styles.buscarVacioText}>
@@ -210,11 +221,11 @@ function ModalBuscarCliente({
             {resultados.map((c) => (
               <Pressable key={c.id} style={styles.resultadoCard} onPress={() => onSeleccionar(c)}>
                 <View style={styles.resultadoAvatar}>
-                  <Text style={styles.resultadoAvatarText}>{c.nombre.charAt(0)}{c.apellido.charAt(0)}</Text>
+                  <Text style={styles.resultadoAvatarText}>{c.nombre.charAt(0)}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.resultadoNombre}>{c.nombre} {c.apellido}</Text>
-                  <Text style={styles.resultadoMeta}>{c.id} · DPI {c.dpi}</Text>
+                  <Text style={styles.resultadoNombre}>{c.nombre}</Text>
+                  {c.dpi && <Text style={styles.resultadoMeta}>DPI {c.dpi}</Text>}
                   <Text style={styles.resultadoMeta}>{c.direccion}, {c.municipio} · {c.zona}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
@@ -245,8 +256,10 @@ export default function NuevoServicioScreen() {
   const [enviando, setEnviando] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalBuscar, setModalBuscar] = useState(false);
-  const [clienteVinculado, setClienteVinculado] = useState<ClienteDB | null>(null);
+  const [clienteVinculado, setClienteVinculado] = useState<ClienteBusqueda | null>(null);
   const [notif, setNotif] = useState<ReturnType<typeof generarNotificacion> | null>(null);
+  const [ubicacionActual, setUbicacionActual] = useState<{ lat: number; lng: number } | null>(null);
+  const [obteniendoUbicacion, setObteniendoUbicacion] = useState(false);
 
   const cambiarCampo = (campo: keyof DatosCliente, valor: string) => {
     setDatos((prev) => ({ ...prev, [campo]: valor }));
@@ -263,16 +276,16 @@ export default function NuevoServicioScreen() {
   const comisionMaxima = saldoNum * (comisionPct / 100);
 
   // Autollenar desde la BD al seleccionar un cliente
-  const vincularCliente = (c: ClienteDB) => {
+  const vincularCliente = (c: ClienteBusqueda) => {
     setClienteVinculado(c);
     setDatos({
       clienteId: c.id,
       nombre: c.nombre,
-      apellido: c.apellido,
-      dpi: c.dpi,
+      apellido: '',
+      dpi: c.dpi ?? '',
       telefono: c.telefono,
       direccion: c.direccion,
-      colonia: c.colonia,
+      colonia: '',
       municipio: c.municipio,
       referencia: '',
       monto_deuda: c.deudaTotal ? String(c.deudaTotal) : '',
@@ -286,6 +299,23 @@ export default function NuevoServicioScreen() {
     setDatos(datosVacios);
   };
 
+  const usarMiUbicacion = async () => {
+    setObteniendoUbicacion(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permiso denegado', 'Activa el permiso de ubicación para marcar dónde está el cliente.');
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setUbicacionActual({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+    } catch {
+      Alert.alert('No se pudo obtener tu ubicación', 'Verifica que el GPS esté activado e intenta de nuevo.');
+    } finally {
+      setObteniendoUbicacion(false);
+    }
+  };
+
   const validarCliente = () => {
     const e: Partial<DatosCliente> = {};
     if (!datos.nombre.trim()) e.nombre = 'El nombre es obligatorio';
@@ -296,19 +326,42 @@ export default function NuevoServicioScreen() {
     return Object.keys(e).length === 0;
   };
 
-  const simularEnvio = () => {
+  const simularEnvio = async () => {
     if (!validarCliente() || !tipoSeleccionado) return;
     setEnviando(true);
-    // TODO: await fetch('/api/casos', { method: 'POST', body: payload })
-    setTimeout(() => {
-      setEnviando(false);
-      setNotif(generarNotificacion(tipoSeleccionado, datos, {
-        tipoLegal: tipoLegal ?? undefined,
-        comisionPct,
-        subtipos: subtiposVerif,
-      }));
-      setModalVisible(true);
-    }, 1000);
+    const tipoLegalInfo = GESTIONES_LEGALES.find((g) => g.id === tipoLegal);
+    const resultado = await crearServicio({
+      tipo: tipoSeleccionado,
+      cliente: {
+        clienteId: clienteVinculado?.id,
+        nombre: datos.nombre,
+        apellido: datos.apellido,
+        dpi: datos.dpi,
+        telefono: datos.telefono,
+        direccion: datos.direccion,
+        colonia: datos.colonia,
+        municipio: datos.municipio,
+        referencia: datos.referencia,
+      },
+      deudaTotal: tipoSeleccionado === 'cobro' ? saldoNum : undefined,
+      comisionPct: tipoSeleccionado === 'cobro' ? comisionPct : undefined,
+      notas: datos.notas,
+      tipoGestionLegal: tipoSeleccionado === 'legal' ? tipoLegalInfo?.label : undefined,
+      tarifaLegal: tipoSeleccionado === 'legal' ? tipoLegalInfo?.tarifa : undefined,
+      subtiposVerificacion: tipoSeleccionado === 'verificacion' ? subtiposVerif : undefined,
+      ubicacion: ubicacionActual ?? undefined,
+    });
+    setEnviando(false);
+    if (!resultado.ok) {
+      Alert.alert('No se pudo publicar la solicitud', resultado.error ?? 'Intenta de nuevo.');
+      return;
+    }
+    setNotif(generarNotificacion(tipoSeleccionado, datos, {
+      tipoLegal: tipoLegal ?? undefined,
+      comisionPct,
+      subtipos: subtiposVerif,
+    }));
+    setModalVisible(true);
   };
 
   const reiniciar = () => {
@@ -320,6 +373,7 @@ export default function NuevoServicioScreen() {
     setComisionPctInput('15');
     setDatos(datosVacios);
     setClienteVinculado(null);
+    setUbicacionActual(null);
     setErrores({});
     setNotif(null);
   };
@@ -451,7 +505,7 @@ export default function NuevoServicioScreen() {
           <View style={styles.vinculadoBox}>
             <Ionicons name="link" size={15} color={Colors.success} />
             <Text style={styles.vinculadoText}>
-              Cliente {clienteVinculado.id} cargado desde la BD
+              {clienteVinculado.nombre} vinculado desde la BD
             </Text>
             <Pressable onPress={desvincularCliente} hitSlop={8}>
               <Text style={styles.vinculadoQuitar}>Quitar</Text>
@@ -488,6 +542,17 @@ export default function NuevoServicioScreen() {
           </View>
         </View>
         <FormInput label="Referencia de ubicación" placeholder='Casa azul con portón negro, frente a la tienda "La Fe"' value={datos.referencia} onChangeText={(t) => cambiarCampo('referencia', t)} />
+
+        <Pressable style={styles.buscarClienteBtn} onPress={usarMiUbicacion} disabled={obteniendoUbicacion}>
+          {obteniendoUbicacion ? (
+            <ActivityIndicator color={Colors.primary} size="small" />
+          ) : (
+            <Ionicons name={ubicacionActual ? 'checkmark-circle' : 'locate-outline'} size={18} color={ubicacionActual ? Colors.success : Colors.primary} />
+          )}
+          <Text style={[styles.buscarClienteText, ubicacionActual && { color: Colors.success }]}>
+            {obteniendoUbicacion ? 'Obteniendo ubicación…' : ubicacionActual ? 'Ubicación del cliente capturada' : 'Usar mi ubicación actual (si estás en el sitio)'}
+          </Text>
+        </Pressable>
 
         {tipoSeleccionado === 'cobro' && (
           <>

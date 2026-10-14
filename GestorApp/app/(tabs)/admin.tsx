@@ -16,15 +16,16 @@ import {
     ESTADO_PARADA_LABEL,
     EstadoParada,
     Parada,
-    RECORRIDOS_HOY,
     RecorridoGestor,
     statsDe,
     statsEquipo,
 } from '@/data/seguimiento';
+import { useSeguimientoEquipo } from '@/hooks/useSeguimientoEquipo';
+import { supabaseConfigurado } from '@/lib/supabase';
 import { ROL_LABEL, TIPO_SERVICIO_LABEL } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const COLOR_ESTADO: Record<EstadoParada, string> = {
   completado: Colors.success,
@@ -38,8 +39,32 @@ const MAP_H = 190;
 const MAP_W = Dimensions.get('window').width - Spacing.xl * 2 - Spacing.md * 2;
 
 export default function AdminScreen() {
-  const [abierto, setAbierto] = useState<string | null>(RECORRIDOS_HOY[0]?.gestorId ?? null);
-  const eq = statsEquipo();
+  const { recorridos, cargando } = useSeguimientoEquipo();
+  const [abierto, setAbierto] = useState<string | null>(null);
+  const eq = statsEquipo(recorridos);
+
+  const abiertoActual = abierto ?? recorridos[0]?.gestorId ?? null;
+
+  if (supabaseConfigurado && cargando && recorridos.length === 0) {
+    return (
+      <View style={[styles.screen, styles.centrado]}>
+        <ActivityIndicator color={Colors.primary} />
+        <Text style={styles.footNote}>Cargando ubicaciones en vivo…</Text>
+      </View>
+    );
+  }
+
+  if (supabaseConfigurado && recorridos.length === 0) {
+    return (
+      <View style={[styles.screen, styles.centrado]}>
+        <Ionicons name="navigate-outline" size={40} color={Colors.textMuted} />
+        <Text style={styles.equipoTitleVacio}>Ningún gestor ha compartido su ubicación todavía</Text>
+        <Text style={styles.footNote}>
+          En cuanto un gestor inicie sesión y acepte el permiso de ubicación, aparecerá aquí en vivo.
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -59,17 +84,19 @@ export default function AdminScreen() {
         </View>
       </View>
 
-      {RECORRIDOS_HOY.map((r) => (
+      {recorridos.map((r) => (
         <TarjetaGestor
           key={r.gestorId}
           r={r}
-          abierto={abierto === r.gestorId}
-          onToggle={() => setAbierto((a) => (a === r.gestorId ? null : r.gestorId))}
+          abierto={abiertoActual === r.gestorId}
+          onToggle={() => setAbierto(abiertoActual === r.gestorId ? '' : r.gestorId)}
         />
       ))}
 
       <Text style={styles.footNote}>
-        Ubicaciones y rutas simuladas para el prototipo. Se integran con GPS real del dispositivo del gestor.
+        {supabaseConfigurado
+          ? 'Ubicación en vivo desde el dispositivo de cada gestor. La ruta del día se arma con los servicios asignados hoy.'
+          : 'Ubicaciones y rutas simuladas para el prototipo (conecta Supabase para ver datos reales).'}
       </Text>
       <View style={{ height: Spacing.xxl }} />
     </ScrollView>
@@ -245,6 +272,8 @@ function Stat({ label, value, color }: { label: string; value: number | string; 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.xl, paddingBottom: Spacing.xxl },
+  centrado: { alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, padding: Spacing.xl },
+  equipoTitleVacio: { ...Typography.subtitle, color: Colors.textPrimary, fontWeight: '700', textAlign: 'center' },
 
   equipoCard: { backgroundColor: Colors.primary, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.lg },
   equipoHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.md },

@@ -1,12 +1,13 @@
 import { BadgeEstado, BadgeTipo, DetailRow } from '@/components/UI';
 import { Colors as COLORS, Radius as RADIUS, Spacing as SPACING } from '@/constants/DesignTokens';
-import { SERVICIOS_MOCK } from '@/data/mocks';
 import { useBottomInset } from '@/hooks/useBottomInset';
-import { ESTADO_LABEL, Servicio } from '@/types';
+import { useServicio } from '@/hooks/useServicios';
+import { ESTADO_LABEL } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Modal,
   Pressable,
@@ -177,8 +178,15 @@ export default function DetalleServicioScreen() {
   const [modalPago, setModalPago] = useState(false);
   const [modalIntento, setModalIntento] = useState(false);
 
-  // Buscar servicio en mocks (después vendrá del API)
-  const servicio: Servicio | undefined = SERVICIOS_MOCK.find((s) => s.id === id);
+  const { servicio, cargando } = useServicio(id as string | undefined);
+
+  if (cargando) {
+    return (
+      <View style={styles.notFound}>
+        <ActivityIndicator color={COLORS.info} />
+      </View>
+    );
+  }
 
   if (!servicio) {
     return (

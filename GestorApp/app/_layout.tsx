@@ -1,6 +1,7 @@
 import { Colors } from '@/constants/DesignTokens';
 import { SesionProvider, useSesion } from '@/domain/auth/sesion';
 import { registrarPushToken } from '@/domain/notificaciones/push';
+import { useUbicacionTracking } from '@/hooks/useUbicacionTracking';
 import { Stack } from 'expo-router';
 import { useEffect } from 'react';
 
@@ -13,10 +14,18 @@ function RegistroPush() {
   return null;
 }
 
+/** Mientras haya sesión de un gestor (no admin), sube su ubicación en vivo. */
+function SeguimientoUbicacion() {
+  const { usuario } = useSesion();
+  useUbicacionTracking(usuario ? { id: usuario.id, rol: usuario.rol } : null);
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <SesionProvider>
       <RegistroPush />
+      <SeguimientoUbicacion />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.background } }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="login" />

@@ -104,9 +104,9 @@ export function statsDe(r: RecorridoGestor): StatsGestor {
 }
 
 /** Totales del equipo para la cabecera del panel. */
-export function statsEquipo() {
+export function statsEquipo(lista: RecorridoGestor[] = RECORRIDOS_HOY) {
   let completadas = 0, noLocalizado = 0, enCurso = 0, pendientes = 0;
-  RECORRIDOS_HOY.forEach((r) => {
+  lista.forEach((r) => {
     const s = statsDe(r);
     completadas += s.completadas;
     noLocalizado += s.noLocalizado;
@@ -115,7 +115,7 @@ export function statsEquipo() {
   });
   const cerradas = completadas + noLocalizado;
   return {
-    gestores: RECORRIDOS_HOY.length,
+    gestores: lista.length,
     completadas, noLocalizado, enCurso, pendientes,
     tasaExito: cerradas ? Math.round((completadas / cerradas) * 100) : 0,
   };

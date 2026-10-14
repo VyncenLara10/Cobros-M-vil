@@ -225,6 +225,15 @@ export interface Servicio {
 
   // Solo cobro — créditos/deudas del cliente (uno por banco).
   creditos?: CreditoCliente[];
+
+  /** Progreso de cada parte de una verificación (domiciliar/laboral), cuando viene de la BD. */
+  partesEstado?: Partial<Record<SubtipoVerificacion, ProgresoParteVerificacion>>;
+}
+
+export interface ProgresoParteVerificacion {
+  enSitio: boolean;
+  completado: boolean;
+  dictamen?: string;
 }
 
 export interface Gestor {

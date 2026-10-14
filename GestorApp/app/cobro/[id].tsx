@@ -13,13 +13,14 @@ import FormInput from '@/components/(auth)/FormInput';
 import PrimaryButton from '@/components/(auth)/PrimaryButton';
 import { ClienteEditableFields, useClienteEditable } from '@/components/servicio/ClienteEditable';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
-import { completarServicio, marcarEnSitio, servicioPorId } from '@/data/mocks';
+import { completarServicio, marcarEnSitio } from '@/domain/servicios/servicios';
 import { comisionMaxCredito, comisionSobreRecuperado } from '@/types';
 import { useBottomInset } from '@/hooks/useBottomInset';
+import { useServicio } from '@/hooks/useServicios';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 type Resultado = 'pago' | 'abono' | 'no_pago' | 'no_localizado';
 
@@ -33,9 +34,10 @@ const RESULTADOS: { id: Resultado; label: string; icon: string; color: string }[
 export default function FormularioCobroScreen() {
   const bottomInset = useBottomInset();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const servicio = servicioPorId(id as string);
+  const { servicio, cargando } = useServicio(id);
 
-  const [enSitio, setEnSitio] = useState(servicio?.fase === 'en_sitio');
+  const [enSitioForzado, setEnSitioForzado] = useState(false);
+  const enSitio = enSitioForzado || servicio?.fase === 'en_sitio';
   const [confirmando, setConfirmando] = useState(false);
   const cli = useClienteEditable(servicio?.cliente ?? ({ nombre: '', telefono: '', direccion: '', zona: '' } as any));
   const [recuperado, setRecuperado] = useState<Record<string, string>>({});
@@ -57,6 +59,14 @@ export default function FormularioCobroScreen() {
     return { recTotal, comTotal: Math.round(comTotal * 100) / 100 };
   }, [recuperado, creditos]);
 
+  if (cargando) {
+    return (
+      <View style={styles.notFound}>
+        <ActivityIndicator color={Colors.primary} />
+      </View>
+    );
+  }
+
   if (!servicio) {
     return (
       <View style={styles.notFound}>
@@ -69,33 +79,29 @@ export default function FormularioCobroScreen() {
     );
   }
 
-  const confirmarLlegada = () => {
+  const confirmarLlegada = async () => {
     setConfirmando(true);
-    setTimeout(() => {
-      marcarEnSitio(servicio.id);
-      setConfirmando(false);
-      setEnSitio(true);
-    }, 900);
+    await marcarEnSitio(servicio.id);
+    setConfirmando(false);
+    setEnSitioForzado(true);
   };
 
-  const enviar = () => {
+  const enviar = async () => {
     if (!resultado) {
       Alert.alert('Falta el resultado', 'Indica cómo terminó la gestión de cobro.');
       return;
     }
     setEnviando(true);
-    setTimeout(() => {
-      completarServicio(servicio.id, resultado === 'no_localizado' ? 'no_localizado' : 'completado', {
-        notaGestor: notas,
-        clienteActualizado: cli.cambios,
-      });
-      setEnviando(false);
-      Alert.alert(
-        '✅ Cobro registrado',
-        `Recuperado: Q ${totales.recTotal.toLocaleString('es-GT', { minimumFractionDigits: 2 })}\nTu comisión: Q ${totales.comTotal.toLocaleString('es-GT', { minimumFractionDigits: 2 })}`,
-        [{ text: 'OK', onPress: () => router.back() }],
-      );
-    }, 1200);
+    await completarServicio(servicio, resultado === 'no_localizado' ? 'no_localizado' : 'completado', {
+      notaGestor: notas,
+      clienteActualizado: cli.cambios,
+    });
+    setEnviando(false);
+    Alert.alert(
+      '✅ Cobro registrado',
+      `Recuperado: Q ${totales.recTotal.toLocaleString('es-GT', { minimumFractionDigits: 2 })}\nTu comisión: Q ${totales.comTotal.toLocaleString('es-GT', { minimumFractionDigits: 2 })}`,
+      [{ text: 'OK', onPress: () => router.back() }],
+    );
   };
 
   // ══════════════ CANDADO DE UBICACIÓN ══════════════

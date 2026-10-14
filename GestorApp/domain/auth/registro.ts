@@ -1,19 +1,3 @@
-/**
- * domain/auth/registro.ts
- * Envía el formulario de /registro a Supabase de verdad:
- *   1. Crea el usuario en Supabase Auth (supabase.auth.signUp). El trigger
- *      `on_auth_user_created` (supabase/schema.sql) crea automáticamente su
- *      fila en public.perfiles con activo=false.
- *   2. Sube cada documento adjunto al bucket de Storage "documentos", en una
- *      carpeta con el id del usuario (documentos/<userId>/<campo>.<ext>).
- *   3. Inserta la fila en public.solicitudes_registro para que el admin la
- *      vea en /aprobaciones (guarda las RUTAS de Storage, no las fotos).
- *
- * Antes de usar esto en producción:
- *   - Crea el bucket "documentos" (privado) en Supabase → Storage.
- *   - Corre las políticas de Storage que están al final de supabase/schema.sql.
- */
-
 import { DatosRegistro } from '@/components/(auth)/tipos-registro';
 import { supabase, supabaseConfigurado } from '@/lib/supabase';
 
@@ -33,7 +17,6 @@ const CAMPOS_DOCUMENTOS: { campo: keyof DatosRegistro; columna: string }[] = [
   { campo: 'carneColegiadoUri', columna: 'doc_carne_colegiado' },
 ];
 
-/** Sube un documento (uri local del ImagePicker, funciona en web y en nativo) y devuelve su ruta en Storage. */
 async function subirDocumento(userId: string, columna: string, uriLocal: string): Promise<string | null> {
   try {
     const respuesta = await fetch(uriLocal);
@@ -61,7 +44,6 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
   }
   if (!datos.rol) return { ok: false, error: 'Falta seleccionar el rol.' };
 
-  // 1) Cuenta en Supabase Auth. El trigger de la BD crea el perfil (inactivo).
   const { data: alta, error: errorAlta } = await supabase.auth.signUp({
     email: datos.correo.trim(),
     password: datos.password,
@@ -74,7 +56,6 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
 
   const userId = alta.user.id;
 
-  // 2) Documentos → Storage (en paralelo).
   const documentos: Record<string, string | null> = {};
   await Promise.all(
     CAMPOS_DOCUMENTOS.map(async ({ campo, columna }) => {
@@ -82,8 +63,7 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
       documentos[columna] = uri ? await subirDocumento(userId, columna, uri) : null;
     }),
   );
-
-  // 3) Solicitud de registro (cola de aprobación del admin).
+  
   const { error: errorSolicitud } = await supabase.from('solicitudes_registro').insert({
     perfil_id: userId,
     rol: datos.rol,

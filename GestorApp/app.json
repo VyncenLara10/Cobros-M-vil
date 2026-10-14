@@ -43,7 +43,13 @@
           "faceIDPermission": "Usa Face ID para entrar más rápido a GestorApp."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "GestorApp usa tu ubicación para que el administrador pueda ver dónde estás mientras trabajas en un servicio."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

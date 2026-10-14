@@ -14,16 +14,12 @@
 import { BadgeTipo } from '@/components/UI';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import { CLIENTES_MOCK } from '@/data/clientesMock';
-import {
-  aceptarServicio,
-  gestorPorId,
-  puntosGestor,
-  serviciosDeGestor,
-  serviciosDisponiblesPara,
-} from '@/data/mocks';
+import { gestorPorId, puntosGestor } from '@/data/mocks';
 import { useSesion } from '@/domain/auth/sesion';
+import { aceptarServicio as aceptarServicioDB } from '@/domain/servicios/servicios';
 import { notificarLocal } from '@/domain/notificaciones/push';
 import { useBottomInset } from '@/hooks/useBottomInset';
+import { useServiciosDeGestor, useServiciosDisponibles } from '@/hooks/useServicios';
 import {
   comisionMaxCredito,
   comisionMaxTotal,
@@ -38,7 +34,7 @@ import {
 } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -59,15 +55,18 @@ export default function MiPerfilScreen() {
 
   const [disponible, setDisponible] = useState(gestor?.disponible ?? true);
   const [seleccion, setSeleccion] = useState<Servicio | null>(null);
-  // Fuerza recomputar los feeds tras mutar los mocks (aceptar/completar).
-  const [tick, setTick] = useState(0);
-  const refrescar = () => setTick((t) => t + 1);
+  const [aceptando, setAceptando] = useState(false);
+
+  const { servicios: pendientes, refrescar: refrescarPendientes } = useServiciosDisponibles(rol);
+  const { servicios: activos, refrescar: refrescarActivos } = useServiciosDeGestor(usuario?.id);
+  const refrescar = () => {
+    refrescarPendientes();
+    refrescarActivos();
+  };
 
   // Al volver de un formulario de completado, recomputar los feeds.
-  useFocusEffect(useCallback(() => { setTick((t) => t + 1); }, []));
+  useFocusEffect(useCallback(() => { refrescar(); }, [refrescar]));
 
-  const pendientes = useMemo(() => serviciosDisponiblesPara(rol), [rol, tick]);
-  const activos = useMemo(() => (usuario ? serviciosDeGestor(usuario.id) : []), [usuario, tick]);
   const puntos = usuario ? puntosGestor(usuario.id) : 0;
 
   // Notifica cuando aparecen solicitudes nuevas (comparado contra la última
@@ -97,15 +96,20 @@ export default function MiPerfilScreen() {
     : undefined;
 
   // ── ACEPTAR: asigna y cierra. NO abre formulario. ──
-  const aceptar = (s: Servicio) => {
-    aceptarServicio(s.id, usuario.id, usuario.nombre);
+  const aceptar = async (s: Servicio) => {
+    setAceptando(true);
+    const resultado = await aceptarServicioDB(s.id, usuario.id, usuario.nombre);
+    setAceptando(false);
     setSeleccion(null);
     refrescar();
+    if (!resultado.ok) {
+      Alert.alert('No se pudo aceptar', resultado.error ?? 'Intenta de nuevo.');
+      return;
+    }
     Alert.alert(
       '✅ Servicio aceptado',
       `${TIPO_SERVICIO_LABEL[s.tipo]} de ${s.cliente.nombre} quedó asignado a ti.\n\nDirígete a la ubicación. Podrás completar el formulario cuando confirmes que llegaste al lugar.`,
     );
-    // TODO: await fetch(`/api/casos/${s.id}/aceptar`, { method: 'POST' })
   };
 
   const rechazar = (s: Servicio) => {
@@ -395,9 +399,9 @@ export default function MiPerfilScreen() {
                     <Ionicons name="close-circle-outline" size={18} color={Colors.danger} />
                     <Text style={styles.btnRechazarText}>Rechazar</Text>
                   </Pressable>
-                  <Pressable style={styles.btnAceptar} onPress={() => aceptar(seleccion)}>
+                  <Pressable style={[styles.btnAceptar, aceptando && { opacity: 0.6 }]} onPress={() => aceptar(seleccion)} disabled={aceptando}>
                     <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
-                    <Text style={styles.btnAceptarText}>Aceptar servicio</Text>
+                    <Text style={styles.btnAceptarText}>{aceptando ? 'Aceptando…' : 'Aceptar servicio'}</Text>
                   </Pressable>
                 </View>
               </ScrollView>

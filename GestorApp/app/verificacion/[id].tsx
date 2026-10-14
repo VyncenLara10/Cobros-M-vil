@@ -19,15 +19,15 @@ import {
   estadoParte,
   marcarEnSitioParte,
   partesVerificacion,
-  servicioPorId,
   ubicacionParte,
-} from '@/data/mocks';
-import { SubtipoVerificacion } from '@/types';
+} from '@/domain/servicios/servicios';
 import { useBottomInset } from '@/hooks/useBottomInset';
+import { useServicio } from '@/hooks/useServicios';
+import { SubtipoVerificacion } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 type Dictamen = 'aprobado' | 'observaciones' | 'rechazado';
 
@@ -58,7 +58,7 @@ const META: Record<SubtipoVerificacion, { label: string; icon: string; lugar: st
 export default function VerificacionScreen() {
   const bottomInset = useBottomInset();
   const { id, parte } = useLocalSearchParams<{ id: string; parte?: string }>();
-  const servicio = servicioPorId(id as string);
+  const { servicio, cargando, refrescar } = useServicio(id);
 
   const partes = servicio ? partesVerificacion(servicio) : [];
   const soloUna = partes.length === 1;
@@ -66,7 +66,8 @@ export default function VerificacionScreen() {
     (parte as SubtipoVerificacion) ?? (soloUna ? partes[0] : null);
 
   // ── Estado del formulario de una parte (declarado siempre, hooks estables) ──
-  const [enSitio, setEnSitio] = useState(parteActiva ? estadoParte(id as string, parteActiva).enSitio : false);
+  const [enSitioForzado, setEnSitioForzado] = useState(false);
+  const enSitio = enSitioForzado || (servicio && parteActiva ? estadoParte(servicio, parteActiva).enSitio : false);
   const [confirmando, setConfirmando] = useState(false);
   const cli = useClienteEditable(servicio?.cliente ?? ({ nombre: '', telefono: '', direccion: '', zona: '' } as any));
   const [fotos, setFotos] = useState<Record<string, string | null>>({});
@@ -78,9 +79,16 @@ export default function VerificacionScreen() {
   const [observaciones, setObservaciones] = useState('');
   const [dictamen, setDictamen] = useState<Dictamen | null>(null);
   const [enviando, setEnviando] = useState(false);
-  const [tick, setTick] = useState(0);
 
-  useFocusEffect(useCallback(() => { setTick((t) => t + 1); }, []));
+  useFocusEffect(useCallback(() => { refrescar(); }, [refrescar]));
+
+  if (cargando) {
+    return (
+      <View style={styles.notFound}>
+        <ActivityIndicator color={Colors.primary} />
+      </View>
+    );
+  }
 
   if (!servicio) {
     return (
@@ -96,7 +104,7 @@ export default function VerificacionScreen() {
 
   // ═══════════════════ HUB: dos partes en lugares distintos ═══════════════════
   if (!parteActiva) {
-    const hechas = partes.filter((p) => estadoParte(servicio.id, p).completado).length;
+    const hechas = partes.filter((p) => estadoParte(servicio, p).completado).length;
     return (
       <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: bottomInset }]}>
         <Pressable style={styles.backRow} onPress={() => router.back()}>
@@ -117,7 +125,7 @@ export default function VerificacionScreen() {
         </Text>
 
         {partes.map((p) => {
-          const est = estadoParte(servicio.id, p);
+          const est = estadoParte(servicio, p);
           const ubic = ubicacionParte(servicio, p);
           const m = META[p];
           return (
@@ -159,24 +167,22 @@ export default function VerificacionScreen() {
   const esDom = parteActiva === 'domiciliar';
   const ubic = ubicacionParte(servicio, parteActiva);
   const m = META[parteActiva];
-  const yaCompletada = estadoParte(servicio.id, parteActiva).completado;
+  const yaCompletada = estadoParte(servicio, parteActiva).completado;
 
   const setFoto = (key: string, uri: string | null) => setFotos((p) => ({ ...p, [key]: uri }));
 
-  const confirmarLlegada = () => {
+  const confirmarLlegada = async () => {
     setConfirmando(true);
     // TODO: expo-location, comparar contra las coordenadas de ESTA parte.
-    setTimeout(() => {
-      marcarEnSitioParte(servicio.id, parteActiva);
-      setConfirmando(false);
-      setEnSitio(true);
-    }, 900);
+    await marcarEnSitioParte(servicio, parteActiva);
+    setConfirmando(false);
+    setEnSitioForzado(true);
   };
 
   const fotosObligatorias = esDom ? FOTOS_DOMICILIAR : FOTOS_LABORAL.slice(0, 2);
   const faltanFotos = fotosObligatorias.filter((f) => !fotos[f.key]).map((f) => f.titulo);
 
-  const enviar = () => {
+  const enviar = async () => {
     if (faltanFotos.length > 0) {
       Alert.alert('Faltan fotografías', `Adjunta: ${faltanFotos.join(', ')}`);
       return;
@@ -186,24 +192,22 @@ export default function VerificacionScreen() {
       return;
     }
     setEnviando(true);
-    setTimeout(() => {
-      const clienteActualizado = esDom
-        ? cli.cambios
-        : { ...(dirLaboral ? { direccionLaboral: dirLaboral } : {}), ...(zonaLaboral ? { zonaLaboral } : {}) };
-      const { completoTodo } = completarParte(servicio.id, parteActiva, {
-        notaGestor: observaciones,
-        clienteActualizado,
-        dictamen,
-      });
-      setEnviando(false);
-      Alert.alert(
-        `✅ Parte ${esDom ? 'domiciliar' : 'laboral'} enviada`,
-        completoTodo
-          ? 'Ambas partes están completas. La verificación quedó finalizada.'
-          : 'Falta la otra parte; dirígete a la siguiente ubicación para completarla.',
-        [{ text: 'OK', onPress: () => router.back() }],
-      );
-    }, 1000);
+    const clienteActualizado = esDom
+      ? cli.cambios
+      : { ...(dirLaboral ? { direccionLaboral: dirLaboral } : {}), ...(zonaLaboral ? { zonaLaboral } : {}) };
+    const { completoTodo } = await completarParte(servicio, parteActiva, {
+      notaGestor: observaciones,
+      clienteActualizado,
+      dictamen,
+    });
+    setEnviando(false);
+    Alert.alert(
+      `✅ Parte ${esDom ? 'domiciliar' : 'laboral'} enviada`,
+      completoTodo
+        ? 'Ambas partes están completas. La verificación quedó finalizada.'
+        : 'Falta la otra parte; dirígete a la siguiente ubicación para completarla.',
+      [{ text: 'OK', onPress: () => router.back() }],
+    );
   };
 
   // Candado de esta parte

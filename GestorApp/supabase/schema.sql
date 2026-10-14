@@ -105,7 +105,19 @@ create table public.clientes (
   salario numeric(10,2),
   direccion_laboral text,
   zona_laboral text,
+  lat double precision,                          -- ubicación de la vivienda (para el mapa del admin)
+  lng double precision,
   creado_en timestamptz not null default now()
+);
+
+-- Contactos de referencia del cliente (esposa, hermano, vecino...). Uno o
+-- varios por cliente. Coincide con types.ts ReferenciaContacto.
+create table public.referencias_cliente (
+  id uuid primary key default gen_random_uuid(),
+  cliente_id uuid not null references public.clientes(id) on delete cascade,
+  nombre text not null,
+  telefono text not null,
+  parentesco text
 );
 
 create table public.servicios (
@@ -125,6 +137,10 @@ create table public.servicios (
   tipo_gestion_legal text,
   tarifa_legal numeric(12,2),
   notas text,
+  -- Progreso de cada parte de una verificación (domiciliar / laboral), porque
+  -- la casa y el trabajo pueden estar en lugares distintos y se completan por
+  -- separado. Forma: {"domiciliar": {"enSitio":true,"completado":true,"dictamen":"aprobado"}, ...}
+  partes_estado jsonb not null default '{}'::jsonb,
   creado_en timestamptz not null default now()
 );
 
@@ -253,32 +269,149 @@ create trigger on_auth_user_created
   for each row execute function public.crear_perfil_nuevo_usuario();
 
 -- ============================================================================
--- Row Level Security (RLS) — ESQUELETO, ajustar antes de ir a producción
+-- Row Level Security (RLS)
 -- ============================================================================
 -- Por defecto Supabase bloquea todo si RLS está activo y no hay políticas.
--- Estas son de partida; revísalas con calma antes de usarlas en real.
+
+-- ─── Funciones helper (security definer: leen perfiles saltando su propia
+-- RLS, pero SOLO devuelven info derivada del usuario autenticado actual) ────
+
+-- Rol del usuario autenticado (o el que se pase, pero en la práctica siempre
+-- se llama con auth.uid()).
+create or replace function public.rol_de(p_uid uuid)
+returns rol_app
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select rol from public.perfiles where id = p_uid;
+$$;
+
+create or replace function public.es_admin()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select coalesce(public.rol_de(auth.uid()) = 'admin', false);
+$$;
+
+-- Espejo de types.ts ROLES_ELEGIBLES: qué rol puede tomar cada tipo de
+-- servicio. Si cambias esa tabla en el código, cámbiala aquí también.
+create or replace function public.rol_elegible(p_rol rol_app, p_tipo tipo_servicio)
+returns boolean
+language sql
+immutable
+as $$
+  select case p_tipo
+    when 'cobro' then p_rol = 'cobrador'
+    when 'legal' then p_rol = 'abogado'
+    when 'notificacion' then p_rol in ('verificador', 'cobrador', 'abogado')
+    when 'verificacion' then p_rol in ('verificador', 'cobrador', 'abogado')
+    else false
+  end;
+$$;
 
 alter table public.perfiles enable row level security;
+alter table public.clientes enable row level security;
+alter table public.referencias_cliente enable row level security;
+alter table public.creditos_cliente enable row level security;
+alter table public.intentos_servicio enable row level security;
 alter table public.servicios enable row level security;
+alter table public.ubicaciones_gestor enable row level security;
 alter table public.solicitudes_registro enable row level security;
 alter table public.notificaciones enable row level security;
 alter table public.push_tokens enable row level security;
 
--- Cada quien lee/edita su propio perfil.
+-- ── perfiles ──────────────────────────────────────────────────────────────
+-- Cada quien lee/edita su propio perfil; el admin ve y aprueba a todos
+-- (lo necesita para admin.tsx, gestores.tsx y aprobaciones.tsx).
 create policy "perfil propio" on public.perfiles
   for select using (auth.uid() = id);
 create policy "perfil propio update" on public.perfiles
   for update using (auth.uid() = id);
+create policy "admin ve todos los perfiles" on public.perfiles
+  for select using (public.es_admin());
+create policy "admin actualiza perfiles" on public.perfiles
+  for update using (public.es_admin());
 
--- Un gestor ve sus servicios asignados o los pendientes sin asignar;
--- el admin ve todo (ajustar el chequeo de rol admin vía una función helper).
-create policy "servicios del gestor" on public.servicios
-  for select using (gestor_id = auth.uid() or gestor_id is null);
+-- ── clientes / referencias / créditos ────────────────────────────────────
+-- Cualquier miembro del staff autenticado puede buscar y crear clientes (se
+-- necesita al publicar una solicitud); solo el admin o el gestor asignado al
+-- servicio de ese cliente puede corregir sus datos.
+create policy "staff lee clientes" on public.clientes
+  for select to authenticated using (true);
+create policy "staff crea clientes" on public.clientes
+  for insert to authenticated with check (true);
+create policy "admin o gestor asignado actualiza cliente" on public.clientes
+  for update to authenticated using (
+    public.es_admin() or exists (
+      select 1 from public.servicios s
+      where s.cliente_id = clientes.id and s.gestor_id = auth.uid()
+    )
+  );
 
--- Solo el propio candidato inserta su solicitud; solo un admin la revisa
--- (falta agregar el check de rol admin con una función is_admin()).
+create policy "staff lee referencias" on public.referencias_cliente
+  for select to authenticated using (true);
+create policy "staff crea referencias" on public.referencias_cliente
+  for insert to authenticated with check (true);
+
+create policy "staff lee creditos" on public.creditos_cliente
+  for select to authenticated using (true);
+create policy "staff crea creditos" on public.creditos_cliente
+  for insert to authenticated with check (true);
+
+-- ── intentos_servicio ─────────────────────────────────────────────────────
+create policy "ver intentos de mi servicio o admin" on public.intentos_servicio
+  for select to authenticated using (
+    public.es_admin() or exists (
+      select 1 from public.servicios s where s.id = intentos_servicio.servicio_id and s.gestor_id = auth.uid()
+    )
+  );
+create policy "crear intento en mi servicio" on public.intentos_servicio
+  for insert to authenticated with check (
+    exists (
+      select 1 from public.servicios s where s.id = intentos_servicio.servicio_id and s.gestor_id = auth.uid()
+    )
+  );
+
+-- ── servicios ─────────────────────────────────────────────────────────────
+-- El admin ve/edita todo. Un gestor ve y edita SOLO lo suyo (gestor_id =
+-- su uid) o lo pendiente sin asignar cuyo tipo le corresponde a su rol
+-- (rol_elegible) — así puede "tomarlo" (UPDATE que le asigna gestor_id).
+-- Cualquier miembro activo del staff puede publicar una solicitud nueva.
+create policy "ver servicios propios, elegibles o admin" on public.servicios
+  for select to authenticated using (
+    public.es_admin()
+    or gestor_id = auth.uid()
+    or (gestor_id is null and estado = 'pendiente' and public.rol_elegible(public.rol_de(auth.uid()), tipo))
+  );
+create policy "crear servicio" on public.servicios
+  for insert to authenticated with check (true);
+create policy "actualizar servicio propio, reclamar pendiente, o admin" on public.servicios
+  for update to authenticated using (
+    public.es_admin()
+    or gestor_id = auth.uid()
+    or (gestor_id is null and estado = 'pendiente' and public.rol_elegible(public.rol_de(auth.uid()), tipo))
+  );
+
+-- ── ubicaciones_gestor (seguimiento en vivo del panel de admin) ──────────
+-- Cada gestor sube/actualiza SOLO su propia fila (lo hace su dispositivo
+-- cada cierto tiempo); el admin lee las de todos para el mapa en vivo.
+create policy "gestor administra su ubicacion" on public.ubicaciones_gestor
+  for all to authenticated using (gestor_id = auth.uid()) with check (gestor_id = auth.uid());
+create policy "admin ve todas las ubicaciones" on public.ubicaciones_gestor
+  for select using (public.es_admin());
+
+-- Solo el propio candidato inserta su solicitud; el admin la revisa/aprueba.
 create policy "crear mi solicitud" on public.solicitudes_registro
   for insert with check (correo = auth.jwt() ->> 'email');
+create policy "admin ve solicitudes" on public.solicitudes_registro
+  for select using (public.es_admin());
+create policy "admin revisa solicitudes" on public.solicitudes_registro
+  for update using (public.es_admin());
 
 -- Cada quien ve sus propias notificaciones.
 create policy "mis notificaciones" on public.notificaciones
@@ -286,6 +419,13 @@ create policy "mis notificaciones" on public.notificaciones
 
 create policy "mis push tokens" on public.push_tokens
   for all using (perfil_id = auth.uid());
+
+-- ── Realtime ──────────────────────────────────────────────────────────────
+-- Para que admin.tsx reciba las ubicaciones/servicios en vivo sin recargar,
+-- activa Replication en el Dashboard (Database → Replication) para las
+-- tablas public.ubicaciones_gestor y public.servicios, o corre:
+--   alter publication supabase_realtime add table public.ubicaciones_gestor;
+--   alter publication supabase_realtime add table public.servicios;
 
 -- ============================================================================
 -- Storage: bucket "documentos"
@@ -304,7 +444,8 @@ create policy "ver mis documentos" on storage.objects
   for select to authenticated
   using (bucket_id = 'documentos' and (storage.foldername(name))[1] = auth.uid()::text);
 
--- Nota: para que el ADMIN pueda ver los documentos de otros al revisar una
--- solicitud (app/(tabs)/aprobaciones.tsx), falta una política adicional que
--- compruebe el rol admin, por ejemplo con una función is_admin(uid) que lea
--- public.perfiles. Se deja pendiente para cuando conectes esa pantalla.
+-- El admin también puede ver los documentos de cualquiera al revisar una
+-- solicitud (app/(tabs)/aprobaciones.tsx).
+create policy "admin ve todos los documentos" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'documentos' and public.es_admin());

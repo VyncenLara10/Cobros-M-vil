@@ -1,33 +1,9 @@
-/**
- * domain/auth/sesion.tsx
- * Sesión de la app conectada a Supabase Auth (tabla public.perfiles, ver
- * supabase/schema.sql). Si el proyecto NO tiene .env configurado
- * (EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY), cae
- * automáticamente al modo demo con las 4 CUENTAS_DEMO, para que el equipo
- * pueda seguir viendo avances de UI sin depender del backend.
- *
- * Qué hace en modo REAL (supabaseConfigurado === true):
- *  - iniciarSesion(correo, clave)      -> supabase.auth.signInWithPassword
- *  - completarMagicLink(codigoPkce)    -> supabase.auth.exchangeCodeForSession
- *    (se llama desde app/auth/callback.tsx cuando el usuario toca el enlace
- *    que le mandamos por correo, ver domain/auth/magicLink.ts)
- *  - Si el usuario tiene MFA (TOTP) activo, ambas rutas devuelven
- *    { requiereMfa: true } y hay que llamar a completarSegundoFactor(codigo).
- *  - Al cargar la perfil desde public.perfiles, si `activo` es false
- *    (solicitud aún no aprobada por el admin) se cierra la sesión y se
- *    muestra un mensaje — no se deja entrar.
- *  - La sesión de Supabase ya persiste sola (AsyncStorage, ver lib/supabase.ts).
- *    Además guardamos una copia liviana del perfil en SecureStore para
- *    pintar el botón de "Entrar con Face ID / huella" sin esperar red.
- */
-
 import { supabase, supabaseConfigurado } from '@/lib/supabase';
 import { RolGestor } from '@/types';
 import * as SecureStore from 'expo-secure-store';
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 import { completarDesafioMfaConCodigo, faltaSegundoFactor } from './mfa';
 
-/** El admin no es un rol de gestor: es quien supervisa. */
 export type RolApp = RolGestor | 'admin';
 
 export const ROL_APP_LABEL: Record<RolApp, string> = {
@@ -53,7 +29,6 @@ interface CuentaDemo {
   perfil: Usuario;
 }
 
-/** 4 accesos estáticos, solo se usan cuando NO hay Supabase configurado. */
 export const CUENTAS_DEMO: CuentaDemo[] = [
   {
     usuario: 'admin',
@@ -77,7 +52,6 @@ export const CUENTAS_DEMO: CuentaDemo[] = [
   },
 ];
 
-// ─── Permisos: qué pestañas ve cada rol ──────────────────────────────────────
 export const RUTAS_POR_ROL: Record<RolApp, string[]> = {
   admin: ['index', 'nuevo-servicio', 'admin', 'aprobaciones', 'gestores', 'reportes'],
   verificador: ['index', 'mi-perfil', 'nuevo-servicio'],
@@ -91,7 +65,7 @@ export function puedeVer(rol: RolApp, ruta: string): boolean {
 
 export const esAdmin = (u: Usuario | null) => u?.rol === 'admin';
 
-// ─── Bloqueo por intentos fallidos (capa extra sobre lo que ya hace Supabase) ─
+
 const MAX_INTENTOS = 5;
 const VENTANA_BLOQUEO_MS = 15 * 60 * 1000; // 15 minutos
 
@@ -159,15 +133,12 @@ async function cargarPerfilDesdeDB(userId: string): Promise<{ usuario: Usuario; 
   return { usuario, activo: data.activo };
 }
 
-// ─── Sesión guardada localmente (para desbloquear con biometría) ────────────
-
 const CLAVE_SECURE_STORE = 'gestorapp_sesion';
 
 async function guardarSesion(u: Usuario): Promise<void> {
   try {
     await SecureStore.setItemAsync(CLAVE_SECURE_STORE, JSON.stringify(u));
   } catch {
-    // Web u otra plataforma sin SecureStore disponible: no rompe el login normal.
   }
 }
 
@@ -197,12 +168,9 @@ async function leerSesionGuardada(): Promise<Usuario | null> {
   }
 }
 
-// ─── Contexto de sesión ──────────────────────────────────────────────────────
-
 export interface ResultadoLogin {
   ok: boolean;
   error?: string;
-  /** true si el password/código fue correcto pero falta el código de la app de autenticación (MFA). */
   requiereMfa?: boolean;
 }
 
@@ -210,11 +178,8 @@ interface SesionCtx {
   usuario: Usuario | null;
   cargando: boolean;
   iniciarSesion: (correo: string, clave: string) => Promise<ResultadoLogin>;
-  /** Completa el login que empezó con el enlace mágico del correo (llamado desde app/auth/callback.tsx). */
   completarMagicLink: (codigoPkce: string) => Promise<ResultadoLogin>;
-  /** Segundo paso cuando iniciarSesion/completarMagicLink devolvieron requiereMfa: true. */
   completarSegundoFactor: (codigo: string) => Promise<ResultadoLogin>;
-  /** Acceso rápido SOLO disponible en modo demo (sin Supabase configurado). */
   entrarComo: (rol: RolApp) => void;
   cerrarSesion: () => Promise<void>;
   restaurarSesionGuardada: () => Promise<boolean>;
@@ -225,10 +190,7 @@ const Ctx = createContext<SesionCtx | null>(null);
 export function SesionProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [cargando, setCargando] = useState(supabaseConfigurado);
-
-  // Al abrir la app: si Supabase ya tiene una sesión guardada (AsyncStorage)
-  // y el perfil está activo, entra directo (sin volver a pedir credenciales).
-  useEffect(() => {
+useEffect(() => {
     if (!supabaseConfigurado) {
       setCargando(false);
       return;
@@ -238,7 +200,6 @@ export function SesionProvider({ children }: { children: ReactNode }) {
       const user = data.session?.user;
       if (user) {
         if (await faltaSegundoFactor()) {
-          // Hay sesión pero falta el código MFA: no autenticamos automático.
           setCargando(false);
           return;
         }
@@ -355,7 +316,6 @@ export function SesionProvider({ children }: { children: ReactNode }) {
         return { ok: true };
       },
 
-      /** Acceso rápido de demo: solo funciona si Supabase no está configurado. */
       entrarComo: (rol) => {
         if (supabaseConfigurado) return;
         const cuenta = CUENTAS_DEMO.find((x) => x.perfil.rol === rol);
@@ -390,7 +350,6 @@ export function useSesion(): SesionCtx {
   return ctx;
 }
 
-/** Hook chico: sólo dice si YA hay una sesión guardada, para pintar el botón de biometría. */
 export function useHaySesionGuardada(): boolean {
   const [hay, setHay] = useState(false);
   useEffect(() => {

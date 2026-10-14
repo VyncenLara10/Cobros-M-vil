@@ -5,12 +5,15 @@
 
 import ServiceCard from '@/components/ServiceCard';
 import { Colors as COLORS, Spacing as SPACING } from '@/constants/DesignTokens';
-import { RESUMEN_HOY, SERVICIOS_MOCK } from '@/data/mocks';
+import { RESUMEN_HOY } from '@/data/mocks';
+import { useSesion } from '@/domain/auth/sesion';
+import { useServiciosVisibles } from '@/hooks/useServicios';
 import { Servicio, TipoServicio } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   RefreshControl,
@@ -85,18 +88,23 @@ function EmptyServicios({ filtro }: { filtro: FiltroTab }) {
 // ─── Pantalla principal ──────────────────────────────────────────────────────
 
 export default function PanelServiciosScreen() {
+  const { usuario } = useSesion();
   const [filtroActivo, setFiltroActivo] = useState<FiltroTab>('todos');
   const [refreshing, setRefreshing] = useState(false);
 
+  // Cada quien ve solo lo suyo: el admin ve todo, un gestor ve sus propios
+  // servicios (cualquier estado) + lo pendiente elegible para su rol.
+  const { servicios: visibles, cargando, refrescar } = useServiciosVisibles(usuario);
+
   const serviciosFiltrados = useMemo<Servicio[]>(() => {
-    if (filtroActivo === 'todos') return SERVICIOS_MOCK;
-    return SERVICIOS_MOCK.filter((s) => s.tipo === filtroActivo);
-  }, [filtroActivo]);
+    if (filtroActivo === 'todos') return visibles;
+    return visibles.filter((s) => s.tipo === filtroActivo);
+  }, [filtroActivo, visibles]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    // TODO: fetch('/api/servicios/hoy') 
-    setTimeout(() => setRefreshing(false), 1000);
+    refrescar();
+    setTimeout(() => setRefreshing(false), 600);
   };
 
   const irADetalle = (id: string) => router.push(`/servicio/${id}`);
@@ -140,19 +148,25 @@ export default function PanelServiciosScreen() {
       </View>
 
       {/* Lista de servicios */}
-      <FlatList
-        data={serviciosFiltrados}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <ServiceCard servicio={item} onPress={irADetalle} />
-        )}
-        contentContainerStyle={styles.lista}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.info} />
-        }
-        ListEmptyComponent={<EmptyServicios filtro={filtroActivo} />}
-      />
+      {cargando && serviciosFiltrados.length === 0 ? (
+        <View style={styles.emptyState}>
+          <ActivityIndicator color={COLORS.info} />
+        </View>
+      ) : (
+        <FlatList
+          data={serviciosFiltrados}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <ServiceCard servicio={item} onPress={irADetalle} />
+          )}
+          contentContainerStyle={styles.lista}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.info} />
+          }
+          ListEmptyComponent={<EmptyServicios filtro={filtroActivo} />}
+        />
+      )}
     </View>
   );
 }
