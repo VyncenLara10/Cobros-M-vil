@@ -54,6 +54,18 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
   if (errorAlta) return { ok: false, error: errorAlta.message };
   if (!alta.user) return { ok: false, error: 'No se pudo crear la cuenta. Intenta de nuevo.' };
 
+  // Si "Confirm email" está activo en Supabase, signUp NO devuelve sesión y lo
+  // que sigue (subir docs + insertar la solicitud) corre sin JWT → RLS lo
+  // rechaza con un error críptico. Mejor cortar aquí con un mensaje claro.
+  if (!alta.session) {
+    return {
+      ok: false,
+      error:
+        'La cuenta se creó pero tu correo debe confirmarse antes de enviar la solicitud. ' +
+        'Para pruebas, desactiva "Confirm email" en Supabase (Authentication → Providers → Email) y vuelve a registrarte.',
+    };
+  }
+
   const userId = alta.user.id;
 
   const documentos: Record<string, string | null> = {};
@@ -84,7 +96,9 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
   if (errorSolicitud) {
     return {
       ok: false,
-      error: `Tu cuenta se creó pero no se pudo enviar la solicitud: ${errorSolicitud.message}. Contacta soporte.`,
+      error:
+        `Tu cuenta se creó pero no se pudo enviar la solicitud: ${errorSolicitud.message}. ` +
+        'Verifica que se haya corrido supabase/fix-registro.sql en el SQL Editor.',
     };
   }
 

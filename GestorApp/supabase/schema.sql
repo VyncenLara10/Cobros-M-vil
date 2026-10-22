@@ -56,6 +56,9 @@ create table public.solicitudes_registro (
   correo text not null,
   telefono text not null,
   dpi_numero text not null,
+  -- Referencia al perfil creado por el trigger on_auth_user_created. La app
+  -- la necesita para activar perfiles.activo al aprobar (domain/aprobaciones).
+  perfil_id uuid references public.perfiles(id),
   numero_colegiado text,
   tipo_vehiculo text,
   placa_vehiculo text,
