@@ -50,6 +50,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="add-circle-outline" size={size} color={color} />
           ),
+          href: ver('nuevo-servicio') ? undefined : null,
         }}
       />
 

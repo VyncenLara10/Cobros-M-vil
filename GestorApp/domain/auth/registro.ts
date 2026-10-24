@@ -1,4 +1,5 @@
 import { DatosRegistro } from '@/components/(auth)/tipos-registro';
+import { zonaATexto } from '@/domain/aprobaciones/aprobaciones';
 import { supabase, supabaseConfigurado } from '@/lib/supabase';
 
 export interface ResultadoRegistro {
@@ -44,11 +45,19 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
   }
   if (!datos.rol) return { ok: false, error: 'Falta seleccionar el rol.' };
 
+  // La metadata viaja a raw_user_meta_data y el trigger `crear_perfil_nuevo_usuario`
+  // la copia a public.perfiles (teléfono, zona, colegiado) al crear el perfil.
   const { data: alta, error: errorAlta } = await supabase.auth.signUp({
     email: datos.correo.trim(),
     password: datos.password,
     options: {
-      data: { nombre: datos.nombreCompleto, rol: datos.rol },
+      data: {
+        nombre: datos.nombreCompleto,
+        rol: datos.rol,
+        telefono: datos.telefono,
+        zona: zonaATexto(datos.zonaCobertura),
+        numero_colegiado: datos.numeroColegiado || null,
+      },
     },
   });
   if (errorAlta) return { ok: false, error: errorAlta.message };

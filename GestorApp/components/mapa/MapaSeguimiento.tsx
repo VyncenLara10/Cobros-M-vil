@@ -13,25 +13,13 @@
  */
 
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
-import { EstadoParada, Parada } from '@/data/seguimiento';
+import { COLOR_ESTADO, MapaProps } from '@/components/mapa/mapa-comun';
+import { Parada } from '@/data/seguimiento';
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 
-export const COLOR_ESTADO: Record<EstadoParada, string> = {
-  completado: Colors.success,
-  no_localizado: Colors.danger,
-  en_sitio: Colors.info,
-  en_camino: Colors.warning,
-  pendiente: Colors.textMuted,
-};
-
-export interface MapaProps {
-  paradas: Parada[];
-  actual: { lat: number; lng: number };
-  nombreGestor: string;
-  alto?: number;
-  ancho: number;
-}
+export { COLOR_ESTADO };
+export type { MapaProps };
 
 // ── Carga condicional de react-native-maps ───────────────────────────────────
 let MapView: any = null;

@@ -7,6 +7,8 @@
  */
 
 import { Avatar } from '@/components/UI';
+import MapaPins from '@/components/mapa/MapaPins';
+import { PinMapa } from '@/components/mapa/mapa-comun';
 import { Colors as COLORS, Radius as RADIUS, Spacing as SPACING } from '@/constants/DesignTokens';
 import { frescuraUbicacion, cargarGestores, GestorEnVivo } from '@/domain/gestores/gestores';
 import { ROL_LABEL, RolGestor } from '@/types';
@@ -15,6 +17,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   FlatList,
   Pressable,
   RefreshControl,
@@ -23,6 +26,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+const ANCHO_MAPA = Dimensions.get('window').width - SPACING.md * 2;
 
 // ─── Filtros por tipo ────────────────────────────────────────────────────────
 
@@ -175,6 +180,32 @@ export default function GestoresScreen() {
 
   const disponibles = gestoresFiltrados.filter((g) => g.disponible).length;
 
+  // Pines del mapa: solo gestores con posición GPS (color por frescura).
+  const puntosMapa: PinMapa[] = gestoresFiltrados
+    .filter((g) => g.ubicacion)
+    .map((g) => {
+      const frescura = frescuraUbicacion(g.ubicacion?.actualizadoEn);
+      const senal =
+        frescura === 'en_vivo'
+          ? 'En vivo'
+          : frescura === 'reciente'
+            ? 'Hace pocos minutos'
+            : 'Sin señal reciente';
+      return {
+        id: g.id,
+        lat: g.ubicacion!.lat,
+        lng: g.ubicacion!.lng,
+        titulo: g.nombre,
+        descripcion: `${ROL_LABEL[g.tipo]} · ${g.zona} · ${senal}`,
+        color:
+          frescura === 'en_vivo'
+            ? COLORS.success
+            : frescura === 'reciente'
+              ? COLORS.warning
+              : COLORS.textMuted,
+      };
+    });
+
   const onRefresh = () => {
     setRefreshing(true);
     recargar();
@@ -247,6 +278,14 @@ export default function GestoresScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.info} />
           }
+          ListHeaderComponent={
+            <View>
+              <MapaPins puntos={puntosMapa} alto={240} ancho={ANCHO_MAPA} />
+              <Text style={styles.mapaLeyenda}>
+                Verde: en vivo · Amarillo: hace pocos minutos · Gris: sin señal
+              </Text>
+            </View>
+          }
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="people-outline" size={40} color={COLORS.textMuted} />
@@ -318,6 +357,12 @@ const styles = StyleSheet.create({
   filterTabTextActive: { color: COLORS.info, fontWeight: '600' },
 
   lista: { padding: SPACING.md, paddingBottom: 100 },
+  mapaLeyenda: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginBottom: SPACING.sm,
+  },
 
   // Tarjeta
   card: {

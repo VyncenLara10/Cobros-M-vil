@@ -269,12 +269,15 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.perfiles (id, nombre, rol, activo)
+  insert into public.perfiles (id, nombre, rol, activo, telefono, zona, numero_colegiado)
   values (
     new.id,
     coalesce(new.raw_user_meta_data ->> 'nombre', new.email),
     coalesce((new.raw_user_meta_data ->> 'rol')::rol_app, 'verificador'),
-    false  -- inactivo hasta que se aprueba la solicitud de registro
+    false,  -- inactivo hasta que se apruebe la solicitud de registro
+    new.raw_user_meta_data ->> 'telefono',
+    new.raw_user_meta_data ->> 'zona',
+    new.raw_user_meta_data ->> 'numero_colegiado'
   );
   return new;
 end;

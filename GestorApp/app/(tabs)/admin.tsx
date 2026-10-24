@@ -1,16 +1,14 @@
 /**
  * app/(tabs)/admin.tsx
  * PANEL DE ADMIN · seguimiento en vivo del equipo en campo.
- * Por cada gestor que aceptó trabajos: su ubicación actual (simulada), la ruta
- * del día en un mini-mapa, la lista ordenada de paradas con su estado, y los
- * contadores del día (hechas, con éxito, no localizados, en curso, % de éxito).
- *
- * El mini-mapa se dibuja con Views posicionadas (sin librerías de mapas) a
- * partir de lat/lng normalizadas. En producción se reemplaza por un mapa real
- * y pings de ubicación por websocket.
+ * Por cada gestor que aceptó trabajos: su ubicación actual (GPS real), la
+ * ruta del día en un mapa real (react-native-maps en Android/iOS, Leaflet
+ * en web; con fallback esquemático si el mapa nativo no está disponible),
+ * la lista ordenada de paradas con su estado, y los contadores del día.
  */
 
 import { Avatar } from '@/components/UI';
+import MapaSeguimiento from '@/components/mapa/MapaSeguimiento';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import {
     ESTADO_PARADA_LABEL,
@@ -131,8 +129,14 @@ function TarjetaGestor({ r, abierto, onToggle }: { r: RecorridoGestor; abierto: 
 
       {abierto && (
         <View style={styles.cardBody}>
-          {/* Mini-mapa de la ruta */}
-          <MiniMapa r={r} />
+          {/* Mapa real de la ruta del día */}
+          <MapaSeguimiento
+            paradas={r.paradas}
+            actual={r.actual}
+            nombreGestor={r.nombre}
+            alto={MAP_H}
+            ancho={MAP_W}
+          />
 
           {/* Stats del día */}
           <View style={styles.statsRow}>
@@ -155,75 +159,6 @@ function TarjetaGestor({ r, abierto, onToggle }: { r: RecorridoGestor; abierto: 
         </View>
       )}
     </View>
-  );
-}
-
-/** Mini-mapa esquemático: normaliza lat/lng a un recuadro y dibuja la ruta. */
-function MiniMapa({ r }: { r: RecorridoGestor }) {
-  const pts = [...r.paradas.map((p) => ({ lat: p.lat, lng: p.lng })), r.actual];
-  const lats = pts.map((p) => p.lat);
-  const lngs = pts.map((p) => p.lng);
-  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-  const spanLat = maxLat - minLat || 0.001;
-  const spanLng = maxLng - minLng || 0.001;
-  const P = 26;
-  const toXY = (lat: number, lng: number) => ({
-    x: P + ((lng - minLng) / spanLng) * (MAP_W - 2 * P),
-    y: P + ((maxLat - lat) / spanLat) * (MAP_H - 2 * P),
-  });
-
-  const puntos = r.paradas.map((p) => ({ ...toXY(p.lat, p.lng), estado: p.estado, orden: p.orden }));
-  const actual = toXY(r.actual.lat, r.actual.lng);
-
-  return (
-    <View style={styles.mapa}>
-      {/* Líneas de la ruta entre paradas consecutivas */}
-      {puntos.slice(1).map((pt, i) => (
-        <Linea key={`l${i}`} a={puntos[i]} b={pt} />
-      ))}
-
-      {/* Paradas numeradas */}
-      {puntos.map((pt) => (
-        <View key={`p${pt.orden}`} style={[styles.mapDot, { left: pt.x - 11, top: pt.y - 11, backgroundColor: COLOR_ESTADO[pt.estado] }]}>
-          <Text style={styles.mapDotText}>{pt.orden}</Text>
-        </View>
-      ))}
-
-      {/* Ubicación actual del gestor */}
-      <View style={[styles.mapActualHalo, { left: actual.x - 16, top: actual.y - 16 }]} />
-      <View style={[styles.mapActual, { left: actual.x - 8, top: actual.y - 8 }]}>
-        <Ionicons name="navigate" size={11} color="#fff" />
-      </View>
-
-      <View style={styles.mapBadge}>
-        <View style={styles.pulseDotSm} />
-        <Text style={styles.mapBadgeText}>Ubicación actual</Text>
-      </View>
-    </View>
-  );
-}
-
-/** Línea entre dos puntos (View rotada), sin dependencias. */
-function Linea({ a, b }: { a: { x: number; y: number }; b: { x: number; y: number } }) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len = Math.hypot(dx, dy);
-  const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
-  const cx = (a.x + b.x) / 2;
-  const cy = (a.y + b.y) / 2;
-  return (
-    <View
-      style={{
-        position: 'absolute',
-        left: cx - len / 2,
-        top: cy - 1,
-        width: len,
-        height: 2,
-        backgroundColor: Colors.borderStrong,
-        transform: [{ rotate: `${ang}deg` }],
-      }}
-    />
   );
 }
 
@@ -278,7 +213,6 @@ const styles = StyleSheet.create({
   equipoCard: { backgroundColor: Colors.primary, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.lg },
   equipoHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.md },
   pulseDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#4ADE80' },
-  pulseDotSm: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#4ADE80' },
   equipoTitle: { ...Typography.subtitle, color: '#fff', fontWeight: '700', flex: 1 },
   equipoLive: { ...Typography.micro, color: '#4ADE80', fontWeight: '800', letterSpacing: 1 },
   equipoStats: { flexDirection: 'row', justifyContent: 'space-between' },
@@ -296,14 +230,6 @@ const styles = StyleSheet.create({
   progresoMini: { ...Typography.micro, color: Colors.textSecondary, textTransform: 'none', letterSpacing: 0 },
 
   cardBody: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.md, borderTopWidth: 0.5, borderTopColor: Colors.border },
-
-  mapa: { height: MAP_H, backgroundColor: Colors.surfaceAlt, borderRadius: Radius.md, borderWidth: 0.5, borderColor: Colors.border, marginTop: Spacing.md, marginBottom: Spacing.md, overflow: 'hidden' },
-  mapDot: { position: 'absolute', width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: Colors.surface },
-  mapDotText: { ...Typography.micro, color: '#fff', fontWeight: '800', textTransform: 'none', letterSpacing: 0 },
-  mapActualHalo: { position: 'absolute', width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(79,110,247,0.22)' },
-  mapActual: { position: 'absolute', width: 16, height: 16, borderRadius: 8, backgroundColor: Colors.info, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#fff' },
-  mapBadge: { position: 'absolute', left: 8, bottom: 8, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: Colors.surface, paddingHorizontal: Spacing.sm, paddingVertical: 4, borderRadius: Radius.pill, borderWidth: 0.5, borderColor: Colors.border },
-  mapBadgeText: { ...Typography.micro, color: Colors.textSecondary, textTransform: 'none', letterSpacing: 0 },
 
   statsRow: { flexDirection: 'row', backgroundColor: Colors.surfaceAlt, borderRadius: Radius.md, paddingVertical: Spacing.sm, marginBottom: Spacing.md },
   stat: { flex: 1, alignItems: 'center' },

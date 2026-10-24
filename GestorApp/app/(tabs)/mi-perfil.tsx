@@ -159,7 +159,8 @@ export default function MiPerfilScreen() {
               </View>
               <Text style={styles.perfilRating}>★ {(stats?.calificacion ?? 5).toFixed(1)}</Text>
             </View>
-            <Text style={styles.perfilZona}>📍 {usuario.zona}</Text>
+            <Text style={styles.perfilZona}>📍 {usuario.zona || 'Sin zona registrada'}</Text>
+            {!!usuario.telefono && <Text style={styles.perfilZona}>📞 {usuario.telefono}</Text>}
           </View>
           <Pressable
             style={[styles.dispChip, disponible ? styles.dispOn : styles.dispOff]}

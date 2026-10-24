@@ -81,6 +81,8 @@ function MetricasBar({ servicios }: { servicios: Servicio[] }) {
 // ─── Empty state ─────────────────────────────────────────────────────────────
 
 function EmptyServicios({ filtro }: { filtro: FiltroTab }) {
+  const { usuario } = useSesion();
+  const esAdmin = usuario?.rol === 'admin';
   return (
     <View style={styles.emptyState}>
       <Ionicons name="folder-open-outline" size={48} color={COLORS.textMuted} />
@@ -88,7 +90,9 @@ function EmptyServicios({ filtro }: { filtro: FiltroTab }) {
         {filtro === 'todos' ? 'Sin servicios hoy' : `Sin servicios de tipo "${filtro}"`}
       </Text>
       <Text style={styles.emptySub}>
-        Crea una nueva solicitud desde la pestaña "Solicitar"
+        {esAdmin
+          ? 'Crea una nueva solicitud desde la pestaña \u201CSolicitar\u201D'
+          : 'Tus servicios asignados aparecerán aquí en cuanto el admin los cree'}
       </Text>
     </View>
   );

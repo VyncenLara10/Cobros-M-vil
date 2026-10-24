@@ -14,7 +14,7 @@ import { SolicitudRegistro } from '@/data/solicitudesRegistro';
 import { supabase } from '@/lib/supabase';
 
 /** Aplana la zona de cobertura del registro a texto plano para perfiles.zona. */
-function zonaATexto(zona: ZonaCobertura | null | undefined): string | null {
+export function zonaATexto(zona: ZonaCobertura | null | undefined): string | null {
   if (!zona || zona.length === 0) return null;
   return zona
     .map((a) => (a.zonas.length > 0 ? `${a.municipio} (${a.zonas.join(', ')})` : a.municipio))
@@ -102,11 +102,16 @@ export async function aprobarSolicitudReal(
   if (errorSolicitud) return { ok: false, error: errorSolicitud.message };
 
   if (s.perfilId) {
-    // activo=true desbloquea el login; zona alimenta el badge "Tu zona" del
-    // ranking de servicios (viene de zona_cobertura del registro).
+    // activo=true desbloquea el login; zona/teléfono/colegiado copian los
+    // datos del registro al perfil para que "Mi perfil" los muestre.
     const { error: errorPerfil } = await supabase
       .from('perfiles')
-      .update({ activo: true, zona: zonaATexto(s.zonaCobertura) })
+      .update({
+        activo: true,
+        zona: zonaATexto(s.zonaCobertura),
+        telefono: s.telefono || null,
+        numero_colegiado: s.numeroColegiado || null,
+      })
       .eq('id', s.perfilId);
     if (errorPerfil) console.warn('[aprobaciones] no se pudo activar el perfil:', errorPerfil.message);
 

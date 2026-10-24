@@ -54,9 +54,11 @@ export const CUENTAS_DEMO: CuentaDemo[] = [
 
 export const RUTAS_POR_ROL: Record<RolApp, string[]> = {
   admin: ['index', 'nuevo-servicio', 'admin', 'aprobaciones', 'gestores', 'reportes'],
-  verificador: ['index', 'mi-perfil', 'nuevo-servicio'],
-  cobrador: ['index', 'mi-perfil', 'nuevo-servicio'],
-  abogado: ['index', 'mi-perfil', 'nuevo-servicio'],
+  // El personal de campo NO crea servicios (solo el admin); por eso
+  // 'nuevo-servicio' (pestaña "Solicitar") no está en sus rutas.
+  verificador: ['index', 'mi-perfil'],
+  cobrador: ['index', 'mi-perfil'],
+  abogado: ['index', 'mi-perfil'],
 };
 
 export function puedeVer(rol: RolApp, ruta: string): boolean {

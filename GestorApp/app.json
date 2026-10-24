@@ -11,6 +11,7 @@
       "supportsTablet": true
     },
     "android": {
+      "softwareKeyboardLayoutMode": "pan",
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyARTP3NQqJV7USU6lb7O4setqVb5kaBvAI"
