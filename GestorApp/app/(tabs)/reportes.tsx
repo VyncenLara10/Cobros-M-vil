@@ -1,40 +1,58 @@
 /**
  * app/(tabs)/reportes.tsx
- * Dashboard de reportes: recuperación, comisiones, rendimiento por tipo
+ * Dashboard de reportes (admin): recuperación real (tabla pagos), comisiones,
+ * tasa de éxito y top gestores — todo desde Supabase, sin mocks.
  */
 
 import { Colors as COLORS, Radius as RADIUS, Spacing as SPACING } from '@/constants/DesignTokens';
-import { GESTORES_MOCK, puntosGestor, SERVICIOS_MOCK } from '@/data/mocks';
+import { cargarGestores, GestorEnVivo } from '@/domain/gestores/gestores';
+import { sumaPagosTotal, serviciosTodos } from '@/domain/servicios/servicios';
+import { Servicio } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-// ─── Datos calculados de los mocks ──────────────────────────────────────────
+// ─── Resumen calculado de datos reales ───────────────────────────────────────
 
-function calcularResumen() {
-  const cobros = SERVICIOS_MOCK.filter((s) => s.tipo === 'cobro');
-  const verifs = SERVICIOS_MOCK.filter((s) => s.tipo === 'verificacion');
-  const legales = SERVICIOS_MOCK.filter((s) => s.tipo === 'legal');
-  const completados = SERVICIOS_MOCK.filter((s) => s.estado === 'completado');
+interface Resumen {
+  totalServicios: number;
+  completados: number;
+  cobros: number;
+  verifs: number;
+  legales: number;
+  notifs: number;
+  activos: number;
+  pendientes: number;
+  noLocalizados: number;
+  totalDeuda: number;
+  totalRecuperado: number;
+  totalComisiones: number;
+  tasaExito: number;
+}
+
+function calcularResumen(servicios: Servicio[], recuperadoPagos: number): Resumen {
+  const cobros = servicios.filter((s) => s.tipo === 'cobro');
+  const verifs = servicios.filter((s) => s.tipo === 'verificacion');
+  const legales = servicios.filter((s) => s.tipo === 'legal');
+  const notifs = servicios.filter((s) => s.tipo === 'notificacion');
+  const completados = servicios.filter((s) => s.estado === 'completado');
   const totalDeuda = cobros.reduce((acc, s) => acc + s.deudaTotal, 0);
-  const totalRecuperado = cobros
-    .filter((s) => s.estado === 'completado')
-    .reduce((acc, s) => acc + s.montoGestion, 0);
-  const totalComisiones = SERVICIOS_MOCK.reduce(
-    (acc, s) => acc + (s.estado === 'completado' ? s.comisionCalculada : 0),
-    0
-  );
-  const tasaExito = SERVICIOS_MOCK.length > 0
-    ? Math.round((completados.length / SERVICIOS_MOCK.length) * 100)
-    : 0;
+  const totalComisiones = completados.reduce((acc, s) => acc + s.comisionCalculada, 0);
+  const tasaExito = servicios.length > 0 ? Math.round((completados.length / servicios.length) * 100) : 0;
 
   return {
-    totalServicios: SERVICIOS_MOCK.length,
+    totalServicios: servicios.length,
     completados: completados.length,
     cobros: cobros.length,
     verifs: verifs.length,
     legales: legales.length,
+    notifs: notifs.length,
+    activos: servicios.filter((s) => s.estado === 'activo').length,
+    pendientes: servicios.filter((s) => s.estado === 'pendiente').length,
+    noLocalizados: servicios.filter((s) => s.estado === 'no_localizado').length,
     totalDeuda,
-    totalRecuperado,
+    totalRecuperado: recuperadoPagos,
     totalComisiones,
     tasaExito,
   };
@@ -98,16 +116,17 @@ function TipoRow({ label, count, total, color, monto }: {
 
 // ─── Top gestores ─────────────────────────────────────────────────────────────
 
-function TopGestores() {
-  const top = [...GESTORES_MOCK]
-    .map((g) => ({ g, puntos: puntosGestor(g.id) }))
-    .sort((a, b) => b.puntos - a.puntos)
-    .slice(0, 3);
+function TopGestores({ gestores }: { gestores: GestorEnVivo[] }) {
+  const top = [...gestores]
+    .sort((a, b) => b.serviciosCompletados - a.serviciosCompletados || b.calificacion - a.calificacion)
+    .slice(0, 5);
+
+  if (top.length === 0) return null;
 
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>TOP GESTORES · POR PUNTAJE</Text>
-      {top.map(({ g, puntos }, i) => (
+      <Text style={styles.sectionTitle}>TOP GESTORES · POR SERVICIOS COMPLETADOS</Text>
+      {top.map((g, i) => (
         <View key={g.id} style={styles.gestorRow}>
           <View style={styles.rankCircle}>
             <Text style={styles.rankText}>#{i + 1}</Text>
@@ -117,7 +136,9 @@ function TopGestores() {
             <Text style={styles.gestorZona}>{g.zona}</Text>
           </View>
           <View style={styles.gestorStats}>
-            <Text style={styles.gestorCompletados}>{puntos} pts · {g.serviciosCompletados} serv.</Text>
+            <Text style={styles.gestorCompletados}>
+              ★ {g.calificacion.toFixed(1)} · {g.serviciosCompletados} serv.
+            </Text>
             <Text style={styles.gestorComision}>Q {g.comisionesAcumuladas.toLocaleString('es-GT')}</Text>
           </View>
         </View>
@@ -129,89 +150,125 @@ function TopGestores() {
 // ─── Pantalla principal ──────────────────────────────────────────────────────
 
 export default function ReportesScreen() {
-  const r = calcularResumen();
+  const [servicios, setServicios] = useState<Servicio[]>([]);
+  const [gestores, setGestores] = useState<GestorEnVivo[]>([]);
+  const [recuperado, setRecuperado] = useState(0);
+  const [cargando, setCargando] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelado = false;
+      Promise.all([serviciosTodos(), cargarGestores(), sumaPagosTotal()]).then(
+        ([svcs, gests, pagos]) => {
+          if (cancelado) return;
+          setServicios(svcs);
+          setGestores(gests);
+          setRecuperado(pagos);
+          setCargando(false);
+        },
+      );
+      return () => {
+        cancelado = true;
+      };
+    }, []),
+  );
+
+  const r = calcularResumen(servicios, recuperado);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Reportes</Text>
-        <Text style={styles.headerSub}>Resumen general · Datos mock</Text>
+        <Text style={styles.headerSub}>Resumen general · Datos en vivo</Text>
       </View>
 
-      {/* Métricas grandes */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>RESUMEN DE RECUPERACIÓN</Text>
-        <BigMetric
-          icon="cash-outline"
-          label="Total recuperado"
-          value={`Q ${r.totalRecuperado.toLocaleString('es-GT')}`}
-          sub={`de Q ${r.totalDeuda.toLocaleString('es-GT')} en cartera`}
-          color={COLORS.success}
-        />
-        <BigMetric
-          icon="trending-up-outline"
-          label="Comisiones generadas"
-          value={`Q ${r.totalComisiones.toLocaleString('es-GT')}`}
-          sub="pagadas a gestores"
-          color={COLORS.info}
-        />
-        <BigMetric
-          icon="checkmark-done-outline"
-          label="Tasa de éxito"
-          value={`${r.tasaExito}%`}
-          sub={`${r.completados} de ${r.totalServicios} servicios completados`}
-          color="#9B7BF0"
-        />
-      </View>
-
-      {/* Distribución por tipo */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>DISTRIBUCIÓN POR TIPO</Text>
-        <View style={styles.card}>
-          <TipoRow
-            label="Cobros"
-            count={r.cobros}
-            total={r.totalServicios}
-            color={COLORS.info}
-            monto={r.totalRecuperado}
-          />
-          <TipoRow
-            label="Verificaciones"
-            count={r.verifs}
-            total={r.totalServicios}
-            color={COLORS.success}
-          />
-          <TipoRow
-            label="Gestiones legales"
-            count={r.legales}
-            total={r.totalServicios}
-            color="#9B7BF0"
-          />
+      {cargando && servicios.length === 0 ? (
+        <View style={styles.loadingBox}>
+          <ActivityIndicator color={COLORS.info} />
         </View>
-      </View>
+      ) : (
+        <>
+          {/* Métricas grandes */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>RESUMEN DE RECUPERACIÓN</Text>
+            <BigMetric
+              icon="cash-outline"
+              label="Total recuperado (pagos)"
+              value={`Q ${r.totalRecuperado.toLocaleString('es-GT')}`}
+              sub={`de Q ${r.totalDeuda.toLocaleString('es-GT')} en cartera`}
+              color={COLORS.success}
+            />
+            <BigMetric
+              icon="trending-up-outline"
+              label="Comisiones generadas"
+              value={`Q ${r.totalComisiones.toLocaleString('es-GT')}`}
+              sub="sobre servicios completados"
+              color={COLORS.info}
+            />
+            <BigMetric
+              icon="checkmark-done-outline"
+              label="Tasa de éxito"
+              value={`${r.tasaExito}%`}
+              sub={`${r.completados} de ${r.totalServicios} servicios completados`}
+              color="#9B7BF0"
+            />
+          </View>
 
-      {/* Estados */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>ESTADOS HOY</Text>
-        <View style={styles.estadosGrid}>
-          {[
-            { label: 'Activos', count: SERVICIOS_MOCK.filter(s => s.estado === 'activo').length, color: COLORS.success },
-            { label: 'Pendientes', count: SERVICIOS_MOCK.filter(s => s.estado === 'pendiente').length, color: COLORS.warning },
-            { label: 'Completados', count: SERVICIOS_MOCK.filter(s => s.estado === 'completado').length, color: COLORS.info },
-            { label: 'No localiz.', count: SERVICIOS_MOCK.filter(s => s.estado === 'no_localizado').length, color: COLORS.danger },
-          ].map((e) => (
-            <View key={e.label} style={[styles.estadoCard, { borderTopColor: e.color, borderTopWidth: 3 }]}>
-              <Text style={[styles.estadoCount, { color: e.color }]}>{e.count}</Text>
-              <Text style={styles.estadoLabel}>{e.label}</Text>
+          {/* Distribución por tipo */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>DISTRIBUCIÓN POR TIPO</Text>
+            <View style={styles.card}>
+              <TipoRow
+                label="Cobros"
+                count={r.cobros}
+                total={r.totalServicios}
+                color={COLORS.info}
+                monto={r.totalRecuperado}
+              />
+              <TipoRow
+                label="Notificaciones"
+                count={r.notifs}
+                total={r.totalServicios}
+                color={COLORS.warning}
+              />
+              <TipoRow
+                label="Verificaciones"
+                count={r.verifs}
+                total={r.totalServicios}
+                color={COLORS.success}
+              />
+              <TipoRow
+                label="Gestiones legales"
+                count={r.legales}
+                total={r.totalServicios}
+                color="#9B7BF0"
+              />
             </View>
-          ))}
-        </View>
-      </View>
+          </View>
 
-      {/* Top gestores */}
-      <TopGestores />
+          {/* Estados */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>ESTADOS</Text>
+            <View style={styles.estadosGrid}>
+              {[
+                { label: 'Activos', count: r.activos, color: COLORS.success },
+                { label: 'Pendientes', count: r.pendientes, color: COLORS.warning },
+                { label: 'Completados', count: r.completados, color: COLORS.info },
+                { label: 'No localiz.', count: r.noLocalizados, color: COLORS.danger },
+              ].map((e) => (
+                <View key={e.label} style={[styles.estadoCard, { borderTopColor: e.color, borderTopWidth: 3 }]}>
+                  <Text style={[styles.estadoCount, { color: e.color }]}>{e.count}</Text>
+                  <Text style={styles.estadoLabel}>{e.label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
 
+          {/* Top gestores */}
+          <TopGestores gestores={gestores} />
+        </>
+      )}
     </ScrollView>
   );
 }
@@ -232,6 +289,8 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 20, fontWeight: '700', color: COLORS.textPrimary },
   headerSub: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
+
+  loadingBox: { paddingVertical: 60, alignItems: 'center' },
 
   section: {
     paddingHorizontal: SPACING.md,

@@ -1,5 +1,12 @@
 import { BadgeEstado, BadgeTipo, DetailRow } from '@/components/UI';
 import { Colors as COLORS, Radius as RADIUS, Spacing as SPACING } from '@/constants/DesignTokens';
+import { useSesion } from '@/domain/auth/sesion';
+import {
+  escalarALegal,
+  marcarNoLocalizado,
+  registrarIntento,
+  registrarPagos,
+} from '@/domain/servicios/servicios';
 import { useBottomInset } from '@/hooks/useBottomInset';
 import { useServicio } from '@/hooks/useServicios';
 import { ESTADO_LABEL } from '@/types';
@@ -175,10 +182,11 @@ function ModalIntento({
 export default function DetalleServicioScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const bottomInset = useBottomInset();
+  const { usuario } = useSesion();
   const [modalPago, setModalPago] = useState(false);
   const [modalIntento, setModalIntento] = useState(false);
 
-  const { servicio, cargando } = useServicio(id as string | undefined);
+  const { servicio, cargando, refrescar } = useServicio(id as string | undefined);
 
   if (cargando) {
     return (
@@ -202,20 +210,29 @@ export default function DetalleServicioScreen() {
 
   // ── Acciones ──────────────────────────────────────────────────────────
 
-  const handlePagoConfirmado = (monto: number) => {
+  const handlePagoConfirmado = async (monto: number) => {
     setModalPago(false);
+    if (!usuario) return;
+    const banco = servicio.creditos?.[0]?.banco ?? 'Cobro directo';
+    const res = await registrarPagos(servicio.id, usuario.id, [{ banco, monto }]);
+    refrescar();
     Alert.alert(
-      '✅ Pago registrado',
-      `Se registró un pago de Q ${monto.toLocaleString('es-GT')}.\nComisión del gestor: Q ${(monto * servicio.comisionPct / 100).toFixed(2)}`,
-      [{ text: 'OK', onPress: () => router.back() }]
+      res.ok ? '✅ Pago registrado' : 'Error al registrar el pago',
+      res.ok
+        ? `Se registró un pago de Q ${monto.toLocaleString('es-GT')}.\nComisión del gestor: Q ${(
+            (monto * servicio.comisionPct) /
+            100
+          ).toFixed(2)}`
+        : res.error ?? 'Error desconocido',
+      [{ text: 'OK', onPress: () => res.ok && router.back() }],
     );
-    // TODO: await fetch(`/api/servicios/${id}/pago`, { method: 'POST', body: { monto } })
   };
 
-  const handleIntentoFallido = (nota: string) => {
+  const handleIntentoFallido = async (nota: string) => {
     setModalIntento(false);
+    await registrarIntento(servicio.id, 'fallido', nota);
+    refrescar();
     Alert.alert('Intento registrado', nota, [{ text: 'OK' }]);
-    // TODO: await fetch(`/api/servicios/${id}/intento`, { method: 'POST', body: { nota, resultado: 'fallido' } })
   };
 
   const handleEscalarLegal = () => {
@@ -227,12 +244,16 @@ export default function DetalleServicioScreen() {
         {
           text: 'Escalar',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert('Caso escalado', 'Se notificó al equipo legal.');
-            // TODO: await fetch(`/api/servicios/${id}/escalar-legal`, { method: 'POST' })
+          onPress: async () => {
+            const res = await escalarALegal(servicio.id);
+            refrescar();
+            Alert.alert(
+              res.ok ? 'Caso escalado' : 'Error al escalar',
+              res.ok ? 'Se notificó al equipo legal.' : (res.error ?? 'Error desconocido'),
+            );
           },
         },
-      ]
+      ],
     );
   };
 
@@ -245,13 +266,15 @@ export default function DetalleServicioScreen() {
         {
           text: 'Confirmar',
           style: 'destructive',
-          onPress: () => {
-            Alert.alert('Marcado', 'El caso quedó como "No localizado".');
-            router.back();
-            // TODO: await fetch(`/api/servicios/${id}/estado`, { method: 'PATCH', body: { estado: 'no_localizado' } })
+          onPress: async () => {
+            await marcarNoLocalizado(servicio);
+            refrescar();
+            Alert.alert('Marcado', 'El caso quedó como "No localizado".', [
+              { text: 'OK', onPress: () => router.back() },
+            ]);
           },
         },
-      ]
+      ],
     );
   };
 
@@ -371,7 +394,13 @@ export default function DetalleServicioScreen() {
                 label="Marcar como completado"
                 color={COLORS.success}
                 bg={`${COLORS.success}15`}
-                onPress={() => Alert.alert('Completado', 'Servicio marcado como completado.')}
+                onPress={() =>
+                  router.push(
+                    servicio.tipo === 'verificacion'
+                      ? { pathname: '/verificacion/[id]', params: { id: servicio.id } }
+                      : { pathname: '/legal/[id]', params: { id: servicio.id } },
+                  )
+                }
               />
             )}
 

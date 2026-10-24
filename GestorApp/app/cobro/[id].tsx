@@ -13,7 +13,8 @@ import FormInput from '@/components/(auth)/FormInput';
 import PrimaryButton from '@/components/(auth)/PrimaryButton';
 import { ClienteEditableFields, useClienteEditable } from '@/components/servicio/ClienteEditable';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
-import { completarServicio, marcarEnSitio } from '@/domain/servicios/servicios';
+import { useSesion } from '@/domain/auth/sesion';
+import { completarServicio, marcarEnSitio, registrarPagos } from '@/domain/servicios/servicios';
 import { comisionMaxCredito, comisionSobreRecuperado } from '@/types';
 import { useBottomInset } from '@/hooks/useBottomInset';
 import { useServicio } from '@/hooks/useServicios';
@@ -34,6 +35,7 @@ const RESULTADOS: { id: Resultado; label: string; icon: string; color: string }[
 export default function FormularioCobroScreen() {
   const bottomInset = useBottomInset();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { usuario } = useSesion();
   const { servicio, cargando } = useServicio(id);
 
   const [enSitioForzado, setEnSitioForzado] = useState(false);
@@ -92,6 +94,17 @@ export default function FormularioCobroScreen() {
       return;
     }
     setEnviando(true);
+    // 1) Guarda los pagos por banco (solo montos > 0) si hubo recuperación.
+    const pagos = creditos
+      .map((c) => {
+        const monto = Math.min(parseFloat(recuperado[c.id] || '0') || 0, c.saldoReal);
+        return { banco: c.banco, monto };
+      })
+      .filter((p) => p.monto > 0);
+    if (pagos.length > 0 && usuario) {
+      await registrarPagos(servicio.id, usuario.id, pagos);
+    }
+    // 2) Completa el servicio con el resultado final.
     await completarServicio(servicio, resultado === 'no_localizado' ? 'no_localizado' : 'completado', {
       notaGestor: notas,
       clienteActualizado: cli.cambios,

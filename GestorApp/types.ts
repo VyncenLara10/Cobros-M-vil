@@ -176,6 +176,9 @@ export interface Cliente {
   trabajo?: string;
   cargo?: string;
   salario?: number;
+  /** Coordenadas del cliente (pin GPS) — base del ranking de cercanía. */
+  lat?: number;
+  lng?: number;
   // Ubicación del TRABAJO (puede ser distinta de la de la vivienda). Se usa
   // para la parte laboral de una verificación, con su propio candado.
   direccionLaboral?: string;
@@ -228,6 +231,23 @@ export interface Servicio {
 
   /** Progreso de cada parte de una verificación (domiciliar/laboral), cuando viene de la BD. */
   partesEstado?: Partial<Record<SubtipoVerificacion, ProgresoParteVerificacion>>;
+
+  // ── Ranking estilo Uber (solo en listas de disponibles) ──
+  /** Distancia en km desde la posición del gestor hasta el cliente (haversine). */
+  distanciaKm?: number;
+  /** true si la zona del gestor coincide con la del cliente (badge "Tu zona"). */
+  enMiZona?: boolean;
+}
+
+/** Pago registrado por el gestor al recuperar dinero de un banco. */
+export interface Pago {
+  id: string;
+  servicioId: string;
+  banco: string;
+  monto: number;
+  referencia?: string;
+  capturadoPor?: string;
+  creadoEn: string;
 }
 
 export interface ProgresoParteVerificacion {

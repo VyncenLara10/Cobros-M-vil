@@ -13,6 +13,7 @@
 import { buscarCliente as buscarClienteMock, ClienteDB } from '@/data/clientesMock';
 import * as Mocks from '@/data/mocks';
 import { supabase, supabaseConfigurado } from '@/lib/supabase';
+import * as Location from 'expo-location';
 import {
   Cliente,
   CreditoCliente,
@@ -20,9 +21,11 @@ import {
   Intento,
   ProgresoParteVerificacion,
   ReferenciaContacto,
+  ROLES_ELEGIBLES,
   RolGestor,
   Servicio,
   SubtipoVerificacion,
+  TIPO_SERVICIO_LABEL,
   TipoServicio,
   rolPuedeAceptar,
 } from '@/types';
@@ -64,6 +67,8 @@ function mapCliente(row: any): Cliente {
     dpi: row?.dpi ?? undefined,
     municipio: row?.municipio ?? undefined,
     departamento: row?.departamento ?? undefined,
+    lat: row?.lat != null ? Number(row.lat) : undefined,
+    lng: row?.lng != null ? Number(row.lng) : undefined,
     trabajo: row?.trabajo ?? undefined,
     cargo: row?.cargo ?? undefined,
     salario: row?.salario != null ? Number(row.salario) : undefined,
@@ -129,11 +134,89 @@ function mapServicio(row: any): Servicio {
   };
 }
 
+// ─── Ranking de cercanía (estilo Uber) ──────────────────────────────────────
+
+/** Distancia en km entre dos puntos (haversine). */
+export function calcularDistanciaKm(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  const R = 6371; // radio de la Tierra en km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(a)) * 10) / 10; // 1 decimal
+}
+
+/** Posición actual del dispositivo (foreground). null si no hay permiso o falla. */
+export async function obtenerPosicionActual(): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (status !== 'granted') return null;
+    const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+  } catch {
+    return null;
+  }
+}
+
+interface OpcionesDisponibles {
+  /** Posición del gestor para calcular distancias (null = sin ranking). */
+  posicion?: { lat: number; lng: number } | null;
+  /** Texto de zona del gestor (perfiles.zona) para el badge "Tu zona". */
+  zonaGestor?: string;
+}
+
+/** true si la zona del cliente (municipio/zona) está en la cobertura del gestor. */
+function clienteEnMiZona(s: Servicio, zonaGestor?: string): boolean {
+  if (!zonaGestor) return false;
+  const z = zonaGestor.toLowerCase();
+  const municipio = s.cliente.municipio?.toLowerCase();
+  const zona = s.cliente.zona?.toLowerCase();
+  return (!!municipio && z.includes(municipio)) || (!!zona && z.includes(zona));
+}
+
+/** Ordena por cercanía y marca distancia/zona. Sin posición, deja el orden por fecha. */
+function rankearDisponibles(
+  servicios: Servicio[],
+  opciones?: OpcionesDisponibles,
+): Servicio[] {
+  const posicion = opciones?.posicion;
+  const conRanking = servicios.map((s) => {
+    const enMiZona = clienteEnMiZona(s, opciones?.zonaGestor);
+    if (posicion && s.cliente.lat != null && s.cliente.lng != null) {
+      const distanciaKm = calcularDistanciaKm(posicion.lat, posicion.lng, s.cliente.lat, s.cliente.lng);
+      return { ...s, distanciaKm, enMiZona };
+    }
+    return { ...s, enMiZona };
+  });
+  // Más cerca primero; los sin ubicación al final (pero visibles, estilo Uber).
+  return conRanking.sort((a, b) => {
+    if (a.distanciaKm == null && b.distanciaKm == null) return 0;
+    if (a.distanciaKm == null) return 1;
+    if (b.distanciaKm == null) return -1;
+    return a.distanciaKm - b.distanciaKm;
+  });
+}
+
 // ─── Lecturas ────────────────────────────────────────────────────────────────
 
-/** Solicitudes pendientes sin asignar que un gestor con ese rol puede tomar. */
-export async function serviciosDisponiblesPara(rol: RolGestor): Promise<Servicio[]> {
-  if (!supabaseConfigurado) return Mocks.serviciosDisponiblesPara(rol);
+/**
+ * Solicitudes pendientes sin asignar que un gestor con ese rol puede tomar.
+ * Con `opciones.posicion` se ordenan por cercanía (Uber-style) y se marca
+ * `distanciaKm`/`enMiZona` en cada tarjeta.
+ */
+export async function serviciosDisponiblesPara(
+  rol: RolGestor,
+  opciones?: OpcionesDisponibles,
+): Promise<Servicio[]> {
+  if (!supabaseConfigurado) {
+    return rankearDisponibles(Mocks.serviciosDisponiblesPara(rol), opciones);
+  }
   const { data, error } = await supabase
     .from('servicios')
     .select(SELECT_SERVICIO)
@@ -144,7 +227,10 @@ export async function serviciosDisponiblesPara(rol: RolGestor): Promise<Servicio
     console.warn('[servicios] serviciosDisponiblesPara', error.message);
     return [];
   }
-  return (data ?? []).filter((r: any) => rolPuedeAceptar(rol, r.tipo)).map(mapServicio);
+  const filtrados = (data ?? [])
+    .filter((r: any) => rolPuedeAceptar(rol, r.tipo))
+    .map(mapServicio);
+  return rankearDisponibles(filtrados, opciones);
 }
 
 /** Servicios ya aceptados (activos) por ese gestor. */
@@ -198,11 +284,14 @@ export async function serviciosTodos(): Promise<Servicio[]> {
  * pendiente elegible para su rol. Así se evita que un gestor vea servicios de
  * otros o que no le pertenecen a su tipo.
  */
-export async function serviciosVisiblesPara(usuario: { id: string; rol: RolApp }): Promise<Servicio[]> {
+export async function serviciosVisiblesPara(
+  usuario: { id: string; rol: RolApp; zona?: string },
+  opciones?: OpcionesDisponibles,
+): Promise<Servicio[]> {
   if (usuario.rol === 'admin') return serviciosTodos();
   const [propios, disponibles] = await Promise.all([
     serviciosDeGestorTodos(usuario.id),
-    serviciosDisponiblesPara(usuario.rol),
+    serviciosDisponiblesPara(usuario.rol, { zonaGestor: usuario.zona, ...opciones }),
   ]);
   const idsPropios = new Set(propios.map((s) => s.id));
   return [...propios, ...disponibles.filter((s) => !idsPropios.has(s.id))];
@@ -363,10 +452,64 @@ export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: bo
       if (errCred) console.warn('[servicios] crearServicio creditos_cliente', errCred.message);
     }
 
+    // Notificación broadcast: una fila por rol elegible, para que el canal
+    // Realtime de cada gestor pueda avisar ("Nuevo servicio disponible").
+    // RLS: "notificaciones broadcast por rol" (perfil_id null + rol_destino).
+    const nombreCliente = [input.cliente.nombre, input.cliente.apellido].filter(Boolean).join(' ').trim();
+    const filasNotif = ROLES_ELEGIBLES[input.tipo].map((rolDestino) => ({
+      perfil_id: null,
+      rol_destino: rolDestino,
+      titulo: '📋 Nuevo servicio disponible',
+      cuerpo: `${TIPO_SERVICIO_LABEL[input.tipo]} para ${nombreCliente || 'un cliente'}${input.cliente.municipio ? ` · ${input.cliente.municipio}` : ''}.`,
+      tipo: 'servicio_nuevo',
+      referencia_id: svc.id,
+    }));
+    const { error: errNotif } = await supabase.from('notificaciones').insert(filasNotif);
+    if (errNotif) console.warn('[servicios] crearServicio notificaciones', errNotif.message);
+
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: e?.message ?? 'Error de conexión con la base de datos' };
   }
+}
+
+// ─── Estadísticas del gestor (gestores_stats) ────────────────────────────────
+
+export interface StatsGestor {
+  calificacion: number;
+  serviciosCompletados: number;
+  comisionesAcumuladas: number;
+  disponible: boolean;
+}
+
+/** Estadísticas reales del gestor; null si aún no existe la fila (mock/primera vez). */
+export async function cargarStatsGestor(perfilId: string): Promise<StatsGestor | null> {
+  if (!supabaseConfigurado) return null;
+  const { data, error } = await supabase
+    .from('gestores_stats')
+    .select('calificacion, servicios_completados, comisiones_acumuladas, disponible')
+    .eq('perfil_id', perfilId)
+    .maybeSingle();
+  if (error) {
+    console.warn('[servicios] cargarStatsGestor', error.message);
+    return null;
+  }
+  if (!data) return null;
+  return {
+    calificacion: Number(data.calificacion ?? 5),
+    serviciosCompletados: data.servicios_completados ?? 0,
+    comisionesAcumuladas: Number(data.comisiones_acumuladas ?? 0),
+    disponible: data.disponible ?? true,
+  };
+}
+
+/** Activa/desactiva la disponibilidad del gestor (aparece en el tab Gestores del admin). */
+export async function actualizarDisponibilidad(perfilId: string, disponible: boolean): Promise<void> {
+  if (!supabaseConfigurado) return;
+  const { error } = await supabase
+    .from('gestores_stats')
+    .upsert({ perfil_id: perfilId, disponible }, { onConflict: 'perfil_id' });
+  if (error) console.warn('[servicios] actualizarDisponibilidad', error.message);
 }
 
 // ─── Aceptar / avanzar / completar ───────────────────────────────────────────
@@ -392,6 +535,103 @@ export async function aceptarServicio(
   if (error) return { ok: false, error: error.message };
   if (!data) return { ok: false, error: 'Este servicio ya fue tomado por otro gestor.' };
   return { ok: true };
+}
+
+/** Devuelve un servicio aceptado al pool: gestor_id=null, estado='pendiente'. */
+export async function rechazarServicio(
+  servicioId: string,
+  gestorId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!supabaseConfigurado) return { ok: true }; // demo: no hay pool real
+  const { data, error } = await supabase
+    .from('servicios')
+    .update({ gestor_id: null, estado: 'pendiente', fase: null })
+    .eq('id', servicioId)
+    .eq('gestor_id', gestorId)
+    .select('id')
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!data) return { ok: false, error: 'Este servicio ya no está asignado a ti.' };
+  // Historial: por qué se devolvió (queda visible para el admin).
+  await registrarIntento(servicioId, 'rechazado', 'El gestor devolvió el servicio al pool.');
+  return { ok: true };
+}
+
+/** Registra un intento de gestión (fallido, rechazado, reprogramado…). */
+export async function registrarIntento(
+  servicioId: string,
+  resultado: string,
+  nota?: string,
+  geolocalizacion?: string,
+): Promise<void> {
+  if (!supabaseConfigurado) return;
+  const { error } = await supabase.from('intentos_servicio').insert({
+    servicio_id: servicioId,
+    resultado,
+    nota: nota?.trim() || null,
+    geolocalizacion: geolocalizacion ?? null,
+  });
+  if (error) console.warn('[servicios] registrarIntento', error.message);
+}
+
+/** Registra pagos recuperados por banco (tabla pagos). */
+export async function registrarPagos(
+  servicioId: string,
+  capturadoPor: string,
+  pagos: { banco: string; monto: number; referencia?: string }[],
+): Promise<{ ok: boolean; error?: string }> {
+  if (!supabaseConfigurado) return { ok: true };
+  if (pagos.length === 0) return { ok: true };
+  const { error } = await supabase.from('pagos').insert(
+    pagos.map((p) => ({
+      servicio_id: servicioId,
+      banco: p.banco,
+      monto: p.monto,
+      referencia: p.referencia?.trim() || null,
+      capturado_por: capturadoPor,
+    })),
+  );
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/** Suma de todos los pagos registrados (admin: RLS lo garantiza). Para reportes. */
+export async function sumaPagosTotal(): Promise<number> {
+  if (!supabaseConfigurado) return 0;
+  const { data, error } = await supabase.from('pagos').select('monto');
+  if (error) {
+    console.warn('[servicios] sumaPagosTotal', error.message);
+    return 0;
+  }
+  return (data ?? []).reduce((t, p) => t + Number(p.monto ?? 0), 0);
+}
+
+/** Convierte un servicio (ya aceptado) en gestión legal: queda visible para abogados. */
+export async function escalarALegal(servicioId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!supabaseConfigurado) return { ok: true };
+  const { data: actual, error: errLeer } = await supabase
+    .from('servicios')
+    .select('notas, tipo_gestion_legal')
+    .eq('id', servicioId)
+    .maybeSingle();
+  if (errLeer) return { ok: false, error: errLeer.message };
+  const notasPrevias = actual?.notas ?? '';
+  const nota = `[Escalado a legal] ${new Date().toLocaleString('es-GT', { hour12: false })}`;
+  const { error } = await supabase
+    .from('servicios')
+    .update({
+      tipo: 'legal',
+      tipo_gestion_legal: actual?.tipo_gestion_legal ?? 'Escalado por gestor',
+      notas: notasPrevias ? `${notasPrevias}\n${nota}` : nota,
+    })
+    .eq('id', servicioId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/** Atajo del detalle: marcar "no localizado" reutilizando completarServicio. */
+export async function marcarNoLocalizado(servicio: Servicio): Promise<void> {
+  await completarServicio(servicio, 'no_localizado');
 }
 
 export async function marcarEnSitio(servicioId: string): Promise<void> {

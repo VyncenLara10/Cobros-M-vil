@@ -176,6 +176,19 @@ create table public.intentos_servicio (
   geolocalizacion text
 );
 
+-- Pagos registrados por el gestor al recuperar dinero banco por banco.
+-- Se alimentan desde el flujo de cobro (app/cobro/[id].tsx y el ModalPago
+-- de app/servicio/[id].tsx) vía domain/servicios/servicios.ts:registrarPagos.
+create table public.pagos (
+  id uuid primary key default gen_random_uuid(),
+  servicio_id uuid not null references public.servicios(id) on delete cascade,
+  banco text not null,
+  monto numeric(12,2) not null,
+  referencia text,
+  capturado_por uuid references public.perfiles(id),
+  creado_en timestamptz not null default now()
+);
+
 -- ─── Seguimiento en vivo (panel de admin) ───────────────────────────────────
 
 create table public.ubicaciones_gestor (
@@ -327,6 +340,7 @@ alter table public.ubicaciones_gestor enable row level security;
 alter table public.solicitudes_registro enable row level security;
 alter table public.notificaciones enable row level security;
 alter table public.push_tokens enable row level security;
+alter table public.pagos enable row level security;
 
 -- ── perfiles ──────────────────────────────────────────────────────────────
 -- Cada quien lee/edita su propio perfil; el admin ve y aprueba a todos
@@ -416,19 +430,62 @@ create policy "admin ve solicitudes" on public.solicitudes_registro
 create policy "admin revisa solicitudes" on public.solicitudes_registro
   for update using (public.es_admin());
 
--- Cada quien ve sus propias notificaciones.
+-- Cada quien ve sus propias notificaciones, más las broadcast por rol
+-- (perfil_id null, creadas por crearServicio cuando hay un servicio nuevo).
 create policy "mis notificaciones" on public.notificaciones
   for select using (perfil_id = auth.uid());
+create policy "notificaciones broadcast por rol" on public.notificaciones
+  for select using (perfil_id is null and rol_destino = public.rol_de(auth.uid()));
+create policy "staff crea notificaciones" on public.notificaciones
+  for insert to authenticated with check (true);
 
 create policy "mis push tokens" on public.push_tokens
   for all using (perfil_id = auth.uid());
 
--- ── Realtime ──────────────────────────────────────────────────────────────
--- Para que admin.tsx reciba las ubicaciones/servicios en vivo sin recargar,
--- activa Replication en el Dashboard (Database → Replication) para las
--- tablas public.ubicaciones_gestor y public.servicios, o corre:
---   alter publication supabase_realtime add table public.ubicaciones_gestor;
---   alter publication supabase_realtime add table public.servicios;
+-- ── pagos ──────────────────────────────────────────────────────────────────
+-- El gestor asignado al servicio ve y registra pagos; el admin ve todo.
+create policy "gestor o admin ven pagos" on public.pagos
+  for select to authenticated
+  using (
+    public.es_admin()
+    or exists (
+      select 1 from public.servicios s
+      where s.id = pagos.servicio_id and s.gestor_id = auth.uid()
+    )
+  );
+create policy "gestor registra pagos" on public.pagos
+  for insert to authenticated
+  with check (
+    capturado_por = auth.uid()
+    and exists (
+      select 1 from public.servicios s
+      where s.id = pagos.servicio_id and s.gestor_id = auth.uid()
+    )
+  );
+
+-- ── Realtime ────────────────────────────────────────────────────────────────
+-- Panel de admin (ubicaciones en vivo) y canales de gestores (servicios
+-- nuevos) usan postgres_changes; las tablas deben estar en la publicación.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'ubicaciones_gestor'
+  ) then
+    alter publication supabase_realtime add table public.ubicaciones_gestor;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'servicios'
+  ) then
+    alter publication supabase_realtime add table public.servicios;
+  end if;
+end $$;
 
 -- ============================================================================
 -- Storage: bucket "documentos"

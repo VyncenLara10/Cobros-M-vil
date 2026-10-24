@@ -6,11 +6,16 @@ import { BadgeEstado, BadgeTipo } from './UI';
 interface Props {
   servicio: Servicio;
   onPress: (id: string) => void;
+  /** Si se provee, se muestra el botón "Aceptar" en tarjetas pendientes. */
+  onAceptar?: (servicio: Servicio) => void;
+  aceptando?: boolean;
 }
 
-export default function ServiceCard({ servicio, onPress }: Props) {
+export default function ServiceCard({ servicio, onPress, onAceptar, aceptando }: Props) {
   const formatMonto = (n: number) =>
     n > 0 ? `Q ${n.toLocaleString('es-GT')}` : '—';
+
+  const esPendiente = servicio.estado === 'pendiente' && servicio.gestorId == null;
 
   return (
     <TouchableOpacity
@@ -28,6 +33,29 @@ export default function ServiceCard({ servicio, onPress }: Props) {
       <Text style={styles.clientAddress}>
         📍 {servicio.cliente.direccion} · {servicio.cliente.zona}
       </Text>
+
+      {/* Chips de cercanía (ranking Uber) */}
+      {(servicio.distanciaKm != null || servicio.enMiZona) && (
+        <View style={styles.chipsRow}>
+          {servicio.distanciaKm != null && (
+            <View style={[styles.chip, servicio.distanciaKm <= 3 && styles.chipCerca]}>
+              <Text style={[styles.chipText, servicio.distanciaKm <= 3 && styles.chipTextCerca]}>
+                📍 {servicio.distanciaKm} km
+              </Text>
+            </View>
+          )}
+          {servicio.distanciaKm != null && servicio.distanciaKm <= 3 && (
+            <View style={[styles.chip, styles.chipCerca]}>
+              <Text style={[styles.chipText, styles.chipTextCerca]}>Cerca de ti</Text>
+            </View>
+          )}
+          {servicio.enMiZona && (
+            <View style={styles.chip}>
+              <Text style={styles.chipText}>Tu zona</Text>
+            </View>
+          )}
+        </View>
+      )}
 
       {/* Meta row */}
       <View style={styles.metaRow}>
@@ -52,9 +80,19 @@ export default function ServiceCard({ servicio, onPress }: Props) {
           )}
           <Text style={styles.footerMonto}>{formatMonto(servicio.montoGestion)}</Text>
         </View>
-        <View style={styles.arrowChip}>
-          <Text style={styles.arrowText}>Ver →</Text>
-        </View>
+        {esPendiente && onAceptar ? (
+          <TouchableOpacity
+            style={[styles.aceptarBtn, aceptando && { opacity: 0.6 }]}
+            onPress={() => onAceptar(servicio)}
+            disabled={aceptando}
+            activeOpacity={0.8}>
+            <Text style={styles.aceptarText}>{aceptando ? '…' : 'Aceptar'}</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.arrowChip}>
+            <Text style={styles.arrowText}>Ver →</Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -90,6 +128,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textSecondary,
     marginBottom: SPACING.sm,
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    gap: SPACING.xs,
+    marginBottom: SPACING.sm,
+  },
+  chip: {
+    backgroundColor: COLORS.surfaceAlt,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: RADIUS.pill,
+    borderWidth: 0.5,
+    borderColor: COLORS.border,
+  },
+  chipCerca: {
+    backgroundColor: COLORS.successMuted,
+    borderColor: COLORS.success,
+  },
+  chipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  chipTextCerca: {
+    color: '#065F46',
   },
   metaRow: {
     flexDirection: 'row',
@@ -130,5 +193,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: COLORS.textSecondary,
+  },
+  aceptarBtn: {
+    backgroundColor: COLORS.success,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: RADIUS.pill,
+  },
+  aceptarText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
   },
 });

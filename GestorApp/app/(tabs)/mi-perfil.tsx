@@ -13,13 +13,17 @@
 
 import { BadgeTipo } from '@/components/UI';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
-import { CLIENTES_MOCK } from '@/data/clientesMock';
-import { gestorPorId, puntosGestor } from '@/data/mocks';
 import { useSesion } from '@/domain/auth/sesion';
-import { aceptarServicio as aceptarServicioDB } from '@/domain/servicios/servicios';
 import { notificarLocal } from '@/domain/notificaciones/push';
+import {
+  aceptarServicio as aceptarServicioDB,
+  actualizarDisponibilidad,
+  cargarStatsGestor,
+  rechazarServicio as rechazarServicioDB,
+  StatsGestor,
+} from '@/domain/servicios/servicios';
 import { useBottomInset } from '@/hooks/useBottomInset';
-import { useServiciosDeGestor, useServiciosDisponibles } from '@/hooks/useServicios';
+import { useServiciosDeGestor, useServiciosDisponibles, useServiciosEnTiempoReal } from '@/hooks/useServicios';
 import {
   comisionMaxCredito,
   comisionMaxTotal,
@@ -51,23 +55,29 @@ export default function MiPerfilScreen() {
   // Guardas defensivas: esta pantalla solo es visible para roles de gestor
   // (el tab se oculta para admin), pero los hooks deben llamarse siempre.
   const rol: RolGestor = usuario && usuario.rol !== 'admin' ? usuario.rol : 'verificador';
-  const gestor = usuario ? gestorPorId(usuario.id) : undefined;
-
-  const [disponible, setDisponible] = useState(gestor?.disponible ?? true);
+  const [stats, setStats] = useState<StatsGestor | null>(null);
+  const [disponible, setDisponible] = useState(true);
   const [seleccion, setSeleccion] = useState<Servicio | null>(null);
   const [aceptando, setAceptando] = useState(false);
 
-  const { servicios: pendientes, refrescar: refrescarPendientes } = useServiciosDisponibles(rol);
+  const { servicios: pendientes, refrescar: refrescarPendientes } = useServiciosDisponibles(rol, usuario?.zona);
   const { servicios: activos, refrescar: refrescarActivos } = useServiciosDeGestor(usuario?.id);
   const refrescar = () => {
     refrescarPendientes();
     refrescarActivos();
+    if (usuario) {
+      cargarStatsGestor(usuario.id).then((s) => {
+        setStats(s);
+        if (s) setDisponible(s.disponible);
+      });
+    }
   };
+
+  // Realtime: servicio nuevo elegible → notificación local + refetch.
+  useServiciosEnTiempoReal(usuario, refrescarPendientes);
 
   // Al volver de un formulario de completado, recomputar los feeds.
   useFocusEffect(useCallback(() => { refrescar(); }, [refrescar]));
-
-  const puntos = usuario ? puntosGestor(usuario.id) : 0;
 
   // Notifica cuando aparecen solicitudes nuevas (comparado contra la última
   // vez que se calculó la lista), no en el primer render.
@@ -91,9 +101,11 @@ export default function MiPerfilScreen() {
 
   if (!usuario) return null;
 
-  const clienteDB = seleccion?.cliente.clienteId
-    ? CLIENTES_MOCK.find((c) => c.id === seleccion.cliente.clienteId)
-    : undefined;
+  const alternarDisponible = () => {
+    const nuevo = !disponible;
+    setDisponible(nuevo);
+    actualizarDisponibilidad(usuario.id, nuevo);
+  };
 
   // ── ACEPTAR: asigna y cierra. NO abre formulario. ──
   const aceptar = async (s: Servicio) => {
@@ -112,10 +124,15 @@ export default function MiPerfilScreen() {
     );
   };
 
-  const rechazar = (s: Servicio) => {
+  const rechazar = async (s: Servicio) => {
     setSeleccion(null);
+    const r = await rechazarServicioDB(s.id, usuario.id);
+    refrescar();
+    if (!r.ok) {
+      Alert.alert('No se pudo rechazar', r.error ?? 'Intenta de nuevo.');
+      return;
+    }
     Alert.alert('Solicitud rechazada', 'Volverá a estar disponible para otros gestores.');
-    // TODO: await fetch(`/api/casos/${s.id}/rechazar`, { method: 'POST' })
   };
 
   // ── COMPLETAR: solo desde "Mis servicios activos". Cada tipo tiene su form. ──
@@ -140,13 +157,13 @@ export default function MiPerfilScreen() {
               <View style={styles.rolBadge}>
                 <Text style={styles.rolBadgeText}>{ROL_LABEL[rol]}</Text>
               </View>
-              <Text style={styles.perfilRating}>★ {(gestor?.calificacion ?? 0).toFixed(1)}</Text>
+              <Text style={styles.perfilRating}>★ {(stats?.calificacion ?? 5).toFixed(1)}</Text>
             </View>
             <Text style={styles.perfilZona}>📍 {usuario.zona}</Text>
           </View>
           <Pressable
             style={[styles.dispChip, disponible ? styles.dispOn : styles.dispOff]}
-            onPress={() => setDisponible((d) => !d)}
+            onPress={alternarDisponible}
           >
             <View style={[styles.dispDot, { backgroundColor: disponible ? Colors.success : Colors.textMuted }]} />
             <Text style={[styles.dispText, { color: disponible ? Colors.success : Colors.textMuted }]}>
@@ -157,12 +174,14 @@ export default function MiPerfilScreen() {
 
         <View style={styles.statsRow}>
           <View style={styles.stat}>
-            <Text style={[styles.statValue, { color: Colors.primary }]}>{puntos}</Text>
-            <Text style={styles.statLabel}>Puntos</Text>
+            <Text style={[styles.statValue, { color: Colors.warning }]}>
+              ★ {(stats?.calificacion ?? 5).toFixed(1)}
+            </Text>
+            <Text style={styles.statLabel}>Rating</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.stat}>
-            <Text style={styles.statValue}>{gestor?.serviciosCompletados ?? 0}</Text>
+            <Text style={styles.statValue}>{stats?.serviciosCompletados ?? 0}</Text>
             <Text style={styles.statLabel}>Completados</Text>
           </View>
           <View style={styles.statDivider} />
@@ -265,6 +284,23 @@ export default function MiPerfilScreen() {
             <Text style={styles.solicitudNombre}>{s.cliente.nombre}</Text>
             <Text style={styles.solicitudDir}>📍 {s.cliente.direccion} · {s.cliente.zona}</Text>
 
+            {(s.distanciaKm != null || s.enMiZona) && (
+              <View style={styles.cercaniaRow}>
+                {s.distanciaKm != null && (
+                  <View style={[styles.cercaniaChip, s.distanciaKm <= 3 && styles.cercaniaChipCerca]}>
+                    <Text style={[styles.cercaniaText, s.distanciaKm <= 3 && styles.cercaniaTextCerca]}>
+                      📍 {s.distanciaKm} km{s.distanciaKm <= 3 ? ' · Cerca de ti' : ''}
+                    </Text>
+                  </View>
+                )}
+                {s.enMiZona && (
+                  <View style={styles.cercaniaChip}>
+                    <Text style={styles.cercaniaText}>Tu zona</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
             <View style={styles.solicitudFooter}>
               <Text style={styles.solicitudMonto}>
                 {s.tipo === 'cobro'
@@ -305,11 +341,11 @@ export default function MiPerfilScreen() {
                 <Text style={styles.modalSeccion}>INFORMACIÓN DEL CLIENTE</Text>
                 <InfoRow icon="call-outline" label="Teléfono" value={seleccion.cliente.telefono} />
                 <InfoRow icon="location-outline" label="Dirección" value={`${seleccion.cliente.direccion}, ${seleccion.cliente.zona}`} />
-                {(seleccion.cliente.dpi || clienteDB?.dpi) && (
-                  <InfoRow icon="card-outline" label="DPI" value={seleccion.cliente.dpi ?? clienteDB!.dpi} />
+                {seleccion.cliente.dpi && (
+                  <InfoRow icon="card-outline" label="DPI" value={seleccion.cliente.dpi} />
                 )}
-                {(seleccion.cliente.municipio || clienteDB?.municipio) && (
-                  <InfoRow icon="business-outline" label="Municipio" value={`${seleccion.cliente.municipio ?? clienteDB?.municipio}`} />
+                {seleccion.cliente.municipio && (
+                  <InfoRow icon="business-outline" label="Municipio" value={seleccion.cliente.municipio} />
                 )}
                 {seleccion.cliente.trabajo && (
                   <InfoRow icon="briefcase-outline" label="Trabajo" value={seleccion.cliente.cargo ? `${seleccion.cliente.trabajo} · ${seleccion.cliente.cargo}` : seleccion.cliente.trabajo} />
@@ -497,6 +533,11 @@ const styles = StyleSheet.create({
   solicitudNombre: { ...Typography.subtitle, color: Colors.textPrimary, marginBottom: 2 },
   solicitudDir: { ...Typography.caption, color: Colors.textSecondary, marginBottom: Spacing.sm },
   solicitudFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: Spacing.sm, borderTopWidth: 0.5, borderTopColor: Colors.border },
+  cercaniaRow: { flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.sm },
+  cercaniaChip: { backgroundColor: Colors.surfaceAlt, paddingHorizontal: 10, paddingVertical: 3, borderRadius: Radius.pill, borderWidth: 0.5, borderColor: Colors.border },
+  cercaniaChipCerca: { backgroundColor: Colors.successMuted, borderColor: Colors.success },
+  cercaniaText: { ...Typography.micro, color: Colors.textSecondary, fontWeight: '600', textTransform: 'none', letterSpacing: 0 },
+  cercaniaTextCerca: { color: '#065F46' },
   solicitudMonto: { ...Typography.caption, color: Colors.textPrimary, fontWeight: '700' },
   verChip: { backgroundColor: Colors.surfaceAlt, paddingHorizontal: Spacing.md, paddingVertical: 6, borderRadius: Radius.pill },
   verChipText: { ...Typography.micro, color: Colors.textSecondary, fontWeight: '600', textTransform: 'none', letterSpacing: 0 },

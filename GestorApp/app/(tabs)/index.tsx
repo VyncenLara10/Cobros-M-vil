@@ -5,14 +5,15 @@
 
 import ServiceCard from '@/components/ServiceCard';
 import { Colors as COLORS, Spacing as SPACING } from '@/constants/DesignTokens';
-import { RESUMEN_HOY } from '@/data/mocks';
 import { useSesion } from '@/domain/auth/sesion';
-import { useServiciosVisibles } from '@/hooks/useServicios';
-import { Servicio, TipoServicio } from '@/types';
+import { aceptarServicio } from '@/domain/servicios/servicios';
+import { useServiciosEnTiempoReal, useServiciosVisibles } from '@/hooks/useServicios';
+import { rolPuedeAceptar, RolGestor, Servicio, TipoServicio } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
+  Alert,
   ActivityIndicator,
   FlatList,
   Pressable,
@@ -30,37 +31,45 @@ type FiltroTab = 'todos' | TipoServicio;
 const FILTROS: { id: FiltroTab; label: string }[] = [
   { id: 'todos', label: 'Todos' },
   { id: 'cobro', label: 'Cobros' },
+  { id: 'notificacion', label: 'Notif.' },
   { id: 'verificacion', label: 'Verif.' },
   { id: 'legal', label: 'Legal' },
 ];
 
 // ─── Componente de métricas ──────────────────────────────────────────────────
 
-function MetricasBar() {
+function MetricasBar({ servicios }: { servicios: Servicio[] }) {
+  const total = servicios.length;
+  const activos = servicios.filter((s) => s.estado === 'activo').length;
+  const pendientes = servicios.filter((s) => s.estado === 'pendiente').length;
+  const completadosHoy = servicios.filter((s) => s.estado === 'completado');
+  const recuperado = completadosHoy.reduce((acc, s) => acc + s.montoGestion, 0);
+  const comisiones = completadosHoy.reduce((acc, s) => acc + s.comisionCalculada, 0);
+
   return (
     <View style={styles.metricasContainer}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.metricasScroll}>
         <View style={styles.metricCard}>
-          <Text style={styles.metricValue}>{RESUMEN_HOY.totalServicios}</Text>
-          <Text style={styles.metricLabel}>Total hoy</Text>
+          <Text style={styles.metricValue}>{total}</Text>
+          <Text style={styles.metricLabel}>Total</Text>
         </View>
         <View style={styles.metricCard}>
-          <Text style={[styles.metricValue, { color: COLORS.success }]}>{RESUMEN_HOY.activos}</Text>
+          <Text style={[styles.metricValue, { color: COLORS.success }]}>{activos}</Text>
           <Text style={styles.metricLabel}>Activos</Text>
         </View>
         <View style={styles.metricCard}>
-          <Text style={[styles.metricValue, { color: COLORS.warning }]}>{RESUMEN_HOY.pendientes}</Text>
+          <Text style={[styles.metricValue, { color: COLORS.warning }]}>{pendientes}</Text>
           <Text style={styles.metricLabel}>Pendientes</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={[styles.metricValue, { color: COLORS.info }]}>
-            Q {RESUMEN_HOY.recuperadoHoy.toLocaleString('es-GT')}
+            Q {recuperado.toLocaleString('es-GT')}
           </Text>
-          <Text style={styles.metricLabel}>Recuperado</Text>
+          <Text style={styles.metricLabel}>Gestión</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={[styles.metricValue, { color: '#9B7BF0' }]}>
-            Q {RESUMEN_HOY.comisionesGeneradas.toLocaleString('es-GT')}
+            Q {comisiones.toLocaleString('es-GT')}
           </Text>
           <Text style={styles.metricLabel}>Comisiones</Text>
         </View>
@@ -91,15 +100,21 @@ export default function PanelServiciosScreen() {
   const { usuario } = useSesion();
   const [filtroActivo, setFiltroActivo] = useState<FiltroTab>('todos');
   const [refreshing, setRefreshing] = useState(false);
+  const [aceptandoId, setAceptandoId] = useState<string | null>(null);
 
   // Cada quien ve solo lo suyo: el admin ve todo, un gestor ve sus propios
   // servicios (cualquier estado) + lo pendiente elegible para su rol.
   const { servicios: visibles, cargando, refrescar } = useServiciosVisibles(usuario);
 
+  // Aparece un servicio nuevo elegible → notificación local + refetch.
+  useServiciosEnTiempoReal(usuario, refrescar);
+
   const serviciosFiltrados = useMemo<Servicio[]>(() => {
     if (filtroActivo === 'todos') return visibles;
     return visibles.filter((s) => s.tipo === filtroActivo);
   }, [filtroActivo, visibles]);
+
+  const esGestor = !!usuario && usuario.rol !== 'admin';
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -108,6 +123,22 @@ export default function PanelServiciosScreen() {
   };
 
   const irADetalle = (id: string) => router.push(`/servicio/${id}`);
+
+  const aceptar = async (s: Servicio) => {
+    if (!usuario || usuario.rol === 'admin') return;
+    setAceptandoId(s.id);
+    const r = await aceptarServicio(s.id, usuario.id, usuario.nombre);
+    setAceptandoId(null);
+    if (!r.ok) {
+      Alert.alert('No se pudo aceptar', r.error ?? 'Intenta de nuevo.');
+      return;
+    }
+    refrescar();
+    Alert.alert(
+      '✅ Servicio aceptado',
+      `${s.cliente.nombre} quedó asignado a ti. Dirígete a la ubicación para completarlo.`,
+    );
+  };
 
   return (
     <View style={styles.screen}>
@@ -130,8 +161,8 @@ export default function PanelServiciosScreen() {
         </Pressable>
       </View>
 
-      {/* Métricas */}
-      <MetricasBar />
+      {/* Métricas (calculadas de los servicios reales cargados) */}
+      <MetricasBar servicios={visibles} />
 
       {/* Tabs de filtro */}
       <View style={styles.tabsRow}>
@@ -156,9 +187,21 @@ export default function PanelServiciosScreen() {
         <FlatList
           data={serviciosFiltrados}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <ServiceCard servicio={item} onPress={irADetalle} />
-          )}
+          renderItem={({ item }) => {
+            const puedeAceptar =
+              esGestor &&
+              item.estado === 'pendiente' &&
+              item.gestorId == null &&
+              rolPuedeAceptar(usuario!.rol as RolGestor, item.tipo);
+            return (
+              <ServiceCard
+                servicio={item}
+                onPress={irADetalle}
+                onAceptar={puedeAceptar ? aceptar : undefined}
+                aceptando={aceptandoId === item.id}
+              />
+            );
+          }}
           contentContainerStyle={styles.lista}
           showsVerticalScrollIndicator={false}
           refreshControl={

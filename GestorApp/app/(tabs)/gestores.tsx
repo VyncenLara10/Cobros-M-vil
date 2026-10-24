@@ -1,17 +1,23 @@
 /**
  * app/(tabs)/gestores.tsx
- * Lista de gestores afiliados con estado, calificación y comisiones
+ * Lista de gestores afiliados (admin): datos reales de perfiles +
+ * gestores_stats + última posición GPS (ubicaciones_gestor). El punto junto
+ * al avatar indica frescura del ping: verde (<2 min), amarillo (<10 min),
+ * gris (sin señal). Refresca solo cada 20s y con pull-to-refresh.
  */
 
 import { Avatar } from '@/components/UI';
 import { Colors as COLORS, Radius as RADIUS, Spacing as SPACING } from '@/constants/DesignTokens';
-import { GESTORES_MOCK } from '@/data/mocks';
-import { Gestor, GESTOR_TIPO_LABEL, TipoGestor } from '@/types';
+import { frescuraUbicacion, cargarGestores, GestorEnVivo } from '@/domain/gestores/gestores';
+import { ROL_LABEL, RolGestor } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -20,7 +26,7 @@ import {
 
 // ─── Filtros por tipo ────────────────────────────────────────────────────────
 
-type FiltroGestor = 'todos' | TipoGestor;
+type FiltroGestor = 'todos' | RolGestor;
 
 const FILTROS: { id: FiltroGestor; label: string; icon: string }[] = [
   { id: 'todos', label: 'Todos', icon: 'people-outline' },
@@ -31,7 +37,7 @@ const FILTROS: { id: FiltroGestor; label: string; icon: string }[] = [
 
 // ─── Tarjeta de gestor ───────────────────────────────────────────────────────
 
-function GestorCard({ gestor, onPress }: { gestor: Gestor; onPress: () => void }) {
+function GestorCard({ gestor }: { gestor: GestorEnVivo }) {
   const rolColor =
     gestor.tipo === 'cobrador'
       ? COLORS.warning
@@ -39,19 +45,26 @@ function GestorCard({ gestor, onPress }: { gestor: Gestor; onPress: () => void }
       ? COLORS.success
       : '#9B7BF0';
 
+  const frescura = frescuraUbicacion(gestor.ubicacion?.actualizadoEn);
+  const puntoColor =
+    frescura === 'en_vivo' ? COLORS.success : frescura === 'reciente' ? COLORS.warning : COLORS.textMuted;
+  const senalTexto =
+    frescura === 'en_vivo'
+      ? 'En vivo'
+      : frescura === 'reciente'
+        ? 'Hace pocos minutos'
+        : gestor.ubicacion
+          ? 'Sin señal reciente'
+          : 'Nunca reportó GPS';
+
   return (
-    <Pressable style={styles.card} onPress={onPress} android_ripple={{ color: COLORS.border }}>
+    <View style={styles.card}>
       {/* Fila principal */}
       <View style={styles.cardRow}>
-        {/* Avatar + disponibilidad */}
+        {/* Avatar + punto de frescura GPS */}
         <View style={styles.avatarWrapper}>
           <Avatar initials={gestor.avatar} size={46} />
-          <View
-            style={[
-              styles.disponibleDot,
-              { backgroundColor: gestor.disponible ? COLORS.success : COLORS.textMuted },
-            ]}
-          />
+          <View style={[styles.disponibleDot, { backgroundColor: puntoColor }]} />
         </View>
 
         {/* Info */}
@@ -60,7 +73,7 @@ function GestorCard({ gestor, onPress }: { gestor: Gestor; onPress: () => void }
             <Text style={styles.cardNombre}>{gestor.nombre}</Text>
             <View style={[styles.rolBadge, { backgroundColor: `${rolColor}18` }]}>
               <Text style={[styles.rolText, { color: rolColor }]}>
-                {GESTOR_TIPO_LABEL[gestor.tipo]}
+                {ROL_LABEL[gestor.tipo]}
               </Text>
             </View>
           </View>
@@ -73,6 +86,11 @@ function GestorCard({ gestor, onPress }: { gestor: Gestor; onPress: () => void }
           <View style={styles.cardMetaRow}>
             <Ionicons name="call-outline" size={12} color={COLORS.textMuted} />
             <Text style={styles.cardMeta}>{gestor.telefono}</Text>
+          </View>
+
+          <View style={styles.cardMetaRow}>
+            <Ionicons name="navigate-outline" size={12} color={puntoColor} />
+            <Text style={[styles.cardMeta, { color: puntoColor, fontWeight: '600' }]}>{senalTexto}</Text>
           </View>
         </View>
       </View>
@@ -112,12 +130,12 @@ function GestorCard({ gestor, onPress }: { gestor: Gestor; onPress: () => void }
                 styles.disponibleText,
                 { color: gestor.disponible ? COLORS.success : COLORS.textMuted },
               ]}>
-              {gestor.disponible ? 'Disponible' : 'Ocupado'}
+              {gestor.disponible ? 'Disponible' : 'Ausente'}
             </Text>
           </View>
         </View>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -126,8 +144,27 @@ function GestorCard({ gestor, onPress }: { gestor: Gestor; onPress: () => void }
 export default function GestoresScreen() {
   const [filtro, setFiltro] = useState<FiltroGestor>('todos');
   const [busqueda, setBusqueda] = useState('');
+  const [gestores, setGestores] = useState<GestorEnVivo[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const gestoresFiltrados = GESTORES_MOCK.filter((g) => {
+  const recargar = useCallback(async () => {
+    const datos = await cargarGestores();
+    setGestores(datos);
+    setCargando(false);
+    setRefreshing(false);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      recargar();
+      // Los pings GPS se mueven solos: refrescar la frescura cada 20s.
+      const intervalo = setInterval(() => recargar(), 20_000);
+      return () => clearInterval(intervalo);
+    }, [recargar]),
+  );
+
+  const gestoresFiltrados = gestores.filter((g) => {
     const matchFiltro = filtro === 'todos' || g.tipo === filtro;
     const matchBusqueda =
       busqueda.trim() === '' ||
@@ -137,6 +174,11 @@ export default function GestoresScreen() {
   });
 
   const disponibles = gestoresFiltrados.filter((g) => g.disponible).length;
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    recargar();
+  };
 
   return (
     <View style={styles.screen}>
@@ -191,26 +233,28 @@ export default function GestoresScreen() {
       </View>
 
       {/* Lista */}
-      <FlatList
-        data={gestoresFiltrados}
-        keyExtractor={(g) => g.id}
-        renderItem={({ item }) => (
-          <GestorCard
-            gestor={item}
-            onPress={() => {
-              // TODO: router.push(`/gestor/${item.id}`)
-            }}
-          />
-        )}
-        contentContainerStyle={styles.lista}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Ionicons name="people-outline" size={40} color={COLORS.textMuted} />
-            <Text style={styles.emptyText}>No se encontraron gestores</Text>
-          </View>
-        }
-      />
+      {cargando && gestores.length === 0 ? (
+        <View style={styles.empty}>
+          <ActivityIndicator color={COLORS.info} />
+        </View>
+      ) : (
+        <FlatList
+          data={gestoresFiltrados}
+          keyExtractor={(g) => g.id}
+          renderItem={({ item }) => <GestorCard gestor={item} />}
+          contentContainerStyle={styles.lista}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.info} />
+          }
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Ionicons name="people-outline" size={40} color={COLORS.textMuted} />
+              <Text style={styles.emptyText}>No se encontraron gestores</Text>
+            </View>
+          }
+        />
+      )}
     </View>
   );
 }
@@ -312,7 +356,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 0.5,
     borderTopColor: COLORS.border,
   },
-  statItem: { flex: 1, alignItems: 'center', gap: 2 },    
+  statItem: { flex: 1, alignItems: 'center', gap: 2 },
   statDivider: { width: 0.5, height: 28, backgroundColor: COLORS.border },
   statValue: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary },
   statLabel: { fontSize: 10, color: COLORS.textMuted },

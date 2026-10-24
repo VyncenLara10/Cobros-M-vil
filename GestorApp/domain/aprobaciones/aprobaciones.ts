@@ -13,6 +13,14 @@ import { ZonaCobertura } from '@/components/(auth)/Coverageareapicker';
 import { SolicitudRegistro } from '@/data/solicitudesRegistro';
 import { supabase } from '@/lib/supabase';
 
+/** Aplana la zona de cobertura del registro a texto plano para perfiles.zona. */
+function zonaATexto(zona: ZonaCobertura | null | undefined): string | null {
+  if (!zona || zona.length === 0) return null;
+  return zona
+    .map((a) => (a.zonas.length > 0 ? `${a.municipio} (${a.zonas.join(', ')})` : a.municipio))
+    .join(' · ');
+}
+
 const DOC_COLUMNAS: { campo: keyof SolicitudRegistro['documentos']; columna: string }[] = [
   { campo: 'fotoPerfilUri', columna: 'doc_foto_perfil' },
   { campo: 'dpiFrenteUri', columna: 'doc_dpi_frente' },
@@ -94,7 +102,12 @@ export async function aprobarSolicitudReal(
   if (errorSolicitud) return { ok: false, error: errorSolicitud.message };
 
   if (s.perfilId) {
-    const { error: errorPerfil } = await supabase.from('perfiles').update({ activo: true }).eq('id', s.perfilId);
+    // activo=true desbloquea el login; zona alimenta el badge "Tu zona" del
+    // ranking de servicios (viene de zona_cobertura del registro).
+    const { error: errorPerfil } = await supabase
+      .from('perfiles')
+      .update({ activo: true, zona: zonaATexto(s.zonaCobertura) })
+      .eq('id', s.perfilId);
     if (errorPerfil) console.warn('[aprobaciones] no se pudo activar el perfil:', errorPerfil.message);
 
     const { error: errorStats } = await supabase
