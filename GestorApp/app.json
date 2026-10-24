@@ -11,6 +11,11 @@
       "supportsTablet": true
     },
     "android": {
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyARTP3NQqJV7USU6lb7O4setqVb5kaBvAI"
+        }
+      },
       "package": "com.tuempresa.cobranzagt",
       "versionCode": 1,
       "adaptiveIcon": {
