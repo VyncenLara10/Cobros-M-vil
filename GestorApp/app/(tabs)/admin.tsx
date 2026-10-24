@@ -23,7 +23,7 @@ import { supabaseConfigurado } from '@/lib/supabase';
 import { ROL_LABEL, TIPO_SERVICIO_LABEL } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { ActivityIndicator, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const COLOR_ESTADO: Record<EstadoParada, string> = {
   completado: Colors.success,
@@ -66,6 +66,8 @@ export default function AdminScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <Text style={styles.pageTitle}>Seguimiento del equipo</Text>
+
       {/* Resumen del equipo */}
       <View style={styles.equipoCard}>
         <View style={styles.equipoHeader}>
@@ -152,9 +154,19 @@ function TarjetaGestor({ r, abierto, onToggle }: { r: RecorridoGestor; abierto: 
             <ParadaRow key={p.servicioId} p={p} ultima={i === r.paradas.length - 1} />
           ))}
 
-          <Pressable style={styles.btnLlamar}>
+          <Pressable
+            style={[styles.btnLlamar, !r.telefono && { opacity: 0.5 }]}
+            disabled={!r.telefono}
+            onPress={() => {
+              if (!r.telefono) return;
+              Linking.openURL(`tel:${r.telefono.replace(/[^\d+]/g, '')}`).catch(() =>
+                console.warn('[admin] no se pudo abrir el marcador'),
+              );
+            }}>
             <Ionicons name="call-outline" size={16} color={Colors.primary} />
-            <Text style={styles.btnLlamarText}>Llamar a {r.nombre.split(' ')[0]} · {r.telefono}</Text>
+            <Text style={styles.btnLlamarText}>
+              {r.telefono ? `Llamar a ${r.nombre.split(' ')[0]} · ${r.telefono}` : 'Sin teléfono registrado'}
+            </Text>
           </Pressable>
         </View>
       )}
@@ -209,6 +221,7 @@ const styles = StyleSheet.create({
   content: { padding: Spacing.xl, paddingBottom: Spacing.xxl },
   centrado: { alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, padding: Spacing.xl },
   equipoTitleVacio: { ...Typography.subtitle, color: Colors.textPrimary, fontWeight: '700', textAlign: 'center' },
+  pageTitle: { ...Typography.title, color: Colors.textPrimary, marginBottom: Spacing.lg },
 
   equipoCard: { backgroundColor: Colors.primary, borderRadius: Radius.lg, padding: Spacing.lg, marginBottom: Spacing.lg },
   equipoHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.md },

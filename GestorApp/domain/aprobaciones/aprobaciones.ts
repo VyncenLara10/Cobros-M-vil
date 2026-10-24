@@ -11,6 +11,7 @@
 
 import { ZonaCobertura } from '@/components/(auth)/Coverageareapicker';
 import { SolicitudRegistro } from '@/data/solicitudesRegistro';
+import { notificarGestor } from '@/domain/notificaciones/notificaciones';
 import { supabase } from '@/lib/supabase';
 
 /** Aplana la zona de cobertura del registro a texto plano para perfiles.zona. */
@@ -119,6 +120,14 @@ export async function aprobarSolicitudReal(
       .from('gestores_stats')
       .upsert({ perfil_id: s.perfilId }, { onConflict: 'perfil_id' });
     if (errorStats) console.warn('[aprobaciones] no se pudieron crear las estadísticas:', errorStats.message);
+
+    await notificarGestor(
+      s.perfilId,
+      '✅ Solicitud aprobada',
+      'Tu cuenta ya está activa. Inicia sesión para empezar a recibir servicios.',
+      'solicitud_aprobada',
+      s.id,
+    );
   }
 
   return { ok: true };
@@ -135,5 +144,12 @@ export async function rechazarSolicitudReal(
     .update({ estado: 'rechazado', motivo_rechazo: motivo.trim(), revisado_por: adminId, revisado_en: new Date().toISOString() })
     .eq('id', s.id);
   if (error) return { ok: false, error: error.message };
+  await notificarGestor(
+    s.perfilId,
+    '❌ Solicitud rechazada',
+    motivo.trim() || 'Revisa tu solicitud con el administrador.',
+    'solicitud_rechazada',
+    s.id,
+  );
   return { ok: true };
 }

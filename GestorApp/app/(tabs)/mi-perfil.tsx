@@ -12,6 +12,7 @@
  */
 
 import { BadgeTipo } from '@/components/UI';
+import ModalRuta from '@/components/ModalRuta';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import { useSesion } from '@/domain/auth/sesion';
 import { notificarLocal } from '@/domain/notificaciones/push';
@@ -59,19 +60,24 @@ export default function MiPerfilScreen() {
   const [disponible, setDisponible] = useState(true);
   const [seleccion, setSeleccion] = useState<Servicio | null>(null);
   const [aceptando, setAceptando] = useState(false);
+  const [modalRuta, setModalRuta] = useState(false);
 
   const { servicios: pendientes, refrescar: refrescarPendientes } = useServiciosDisponibles(rol, usuario?.zona);
   const { servicios: activos, refrescar: refrescarActivos } = useServiciosDeGestor(usuario?.id);
-  const refrescar = () => {
+  // IMPORTANTE: refrescar DEBE ser estable (useCallback con dependencias
+  // primitivas). Se pasa a useFocusEffect abajo; si se recreara en cada render
+  // entraría en bucle infinito y Android cerraba la app al abrir esta pantalla.
+  const usuarioId = usuario?.id;
+  const refrescar = useCallback(() => {
     refrescarPendientes();
     refrescarActivos();
-    if (usuario) {
-      cargarStatsGestor(usuario.id).then((s) => {
+    if (usuarioId) {
+      cargarStatsGestor(usuarioId).then((s) => {
         setStats(s);
         if (s) setDisponible(s.disponible);
       });
     }
-  };
+  }, [usuarioId, refrescarPendientes, refrescarActivos]);
 
   // Realtime: servicio nuevo elegible → notificación local + refetch.
   useServiciosEnTiempoReal(usuario, refrescarPendientes);
@@ -145,6 +151,8 @@ export default function MiPerfilScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <Text style={styles.pageTitle}>Mi perfil</Text>
+
       {/* ── Encabezado de perfil ── */}
       <View style={styles.perfilCard}>
         <View style={styles.perfilTop}>
@@ -225,7 +233,6 @@ export default function MiPerfilScreen() {
                       <Text style={styles.subChipText}>{subtiposTexto(s.subtiposVerificacion)}</Text>
                     </View>
                   )}
-                  <Text style={styles.solicitudId}>{s.id}</Text>
                 </View>
 
                 <Text style={styles.solicitudNombre}>{s.cliente.nombre}</Text>
@@ -279,7 +286,6 @@ export default function MiPerfilScreen() {
                   <Text style={styles.subChipText}>{subtiposTexto(s.subtiposVerificacion)}</Text>
                 </View>
               )}
-              <Text style={styles.solicitudId}>{s.id}</Text>
             </View>
 
             <Text style={styles.solicitudNombre}>{s.cliente.nombre}</Text>
@@ -430,6 +436,12 @@ export default function MiPerfilScreen() {
                   </Text>
                 </View>
 
+                {/* Ver en mapa / navegar (decidir si conviene aunque no sea tu zona) */}
+                <Pressable style={styles.btnMapa} onPress={() => setModalRuta(true)}>
+                  <Ionicons name="map-outline" size={18} color={Colors.info} />
+                  <Text style={styles.btnMapaText}>Ver en mapa y navegar</Text>
+                </Pressable>
+
                 {/* Acciones */}
                 <View style={styles.accionesRow}>
                   <Pressable style={styles.btnRechazar} onPress={() => rechazar(seleccion)}>
@@ -446,6 +458,22 @@ export default function MiPerfilScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal: mapa + ruta hacia el servicio */}
+      <ModalRuta
+        visible={modalRuta && !!seleccion}
+        destino={
+          seleccion
+            ? {
+                lat: seleccion.cliente.lat,
+                lng: seleccion.cliente.lng,
+                titulo: seleccion.cliente.nombre,
+                direccion: `${seleccion.cliente.direccion}, ${seleccion.cliente.zona}`,
+              }
+            : null
+        }
+        onCerrar={() => setModalRuta(false)}
+      />
     </ScrollView>
   );
 }
@@ -493,6 +521,7 @@ function CreditoRow({ c }: { c: CreditoCliente }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.lg, paddingBottom: Spacing.xxl },
+  pageTitle: { ...Typography.title, color: Colors.textPrimary, marginBottom: Spacing.md },
 
   perfilCard: { backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 0.5, borderColor: Colors.border, padding: Spacing.lg, marginBottom: Spacing.lg },
   perfilTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md },
@@ -530,7 +559,6 @@ const styles = StyleSheet.create({
   solicitudTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
   subChip: { backgroundColor: Colors.successMuted, paddingHorizontal: Spacing.sm, paddingVertical: 2, borderRadius: Radius.pill },
   subChipText: { ...Typography.micro, color: '#065F46', fontWeight: '700', textTransform: 'none', letterSpacing: 0 },
-  solicitudId: { ...Typography.micro, color: Colors.textMuted, marginLeft: 'auto', fontFamily: 'monospace' },
   solicitudNombre: { ...Typography.subtitle, color: Colors.textPrimary, marginBottom: 2 },
   solicitudDir: { ...Typography.caption, color: Colors.textSecondary, marginBottom: Spacing.sm },
   solicitudFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: Spacing.sm, borderTopWidth: 0.5, borderTopColor: Colors.border },
@@ -586,6 +614,9 @@ const styles = StyleSheet.create({
 
   flujoAviso: { flexDirection: 'row', gap: Spacing.sm, backgroundColor: Colors.surfaceAlt, borderRadius: Radius.md, padding: Spacing.md, marginTop: Spacing.lg, alignItems: 'flex-start' },
   flujoAvisoText: { ...Typography.micro, color: Colors.textSecondary, flex: 1, textTransform: 'none', letterSpacing: 0, lineHeight: 15 },
+
+  btnMapa: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingVertical: Spacing.md, borderRadius: Radius.md, backgroundColor: Colors.infoMuted, marginTop: Spacing.md, borderWidth: 0.5, borderColor: Colors.info },
+  btnMapaText: { ...Typography.subtitle, color: Colors.info, fontWeight: '700' },
 
   accionesRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.lg },
   btnRechazar: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs, paddingVertical: Spacing.md, borderRadius: Radius.md, backgroundColor: Colors.dangerMuted },

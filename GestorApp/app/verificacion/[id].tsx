@@ -14,6 +14,7 @@ import FormInput from '@/components/(auth)/FormInput';
 import PrimaryButton from '@/components/(auth)/PrimaryButton';
 import { ClienteEditableFields, useClienteEditable } from '@/components/servicio/ClienteEditable';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
+import { subirEvidencias } from '@/domain/servicios/evidencias';
 import {
   completarParte,
   estadoParte,
@@ -200,12 +201,15 @@ export default function VerificacionScreen() {
       clienteActualizado,
       dictamen,
     });
+    const evid = await subirEvidencias(servicio.id, fotos);
     setEnviando(false);
+    const avisoFotos =
+      evid.fallidas > 0 ? `\n⚠️ No se pudieron subir ${evid.fallidas} foto(s); verifica tu conexión.` : '';
     Alert.alert(
       `✅ Parte ${esDom ? 'domiciliar' : 'laboral'} enviada`,
-      completoTodo
+      (completoTodo
         ? 'Ambas partes están completas. La verificación quedó finalizada.'
-        : 'Falta la otra parte; dirígete a la siguiente ubicación para completarla.',
+        : 'Falta la otra parte; dirígete a la siguiente ubicación para completarla.') + avisoFotos,
       [{ text: 'OK', onPress: () => router.back() }],
     );
   };

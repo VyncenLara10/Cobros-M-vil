@@ -42,19 +42,34 @@ function useCargaServicios(cargar: () => Promise<Servicio[]>, deps: any[]): Esta
   useEffect(() => {
     let cancelado = false;
     setCargando(true);
-    cargar().then((data) => {
-      if (!cancelado) {
-        setServicios(data);
-        setCargando(false);
-      }
-    });
+    cargar()
+      .then((data) => {
+        if (!cancelado) {
+          setServicios(data);
+          setCargando(false);
+        }
+      })
+      .catch((e) => {
+        // Nunca dejar una promesa rechazada sin manejar: en Android una
+        // excepción no capturada puede cerrar la app. Se vacía la lista y
+        // se marca la carga como terminada.
+        console.warn('[servicios] error cargando lista', e);
+        if (!cancelado) {
+          setServicios([]);
+          setCargando(false);
+        }
+      });
     return () => {
       cancelado = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
 
-  return { servicios, cargando, refrescar: () => setTick((t) => t + 1) };
+  // ESTABLE: este callback se usa dentro de useFocusEffect en las pantallas;
+  // si se recreara en cada render provocaría un bucle infinito de re-render
+  // (crash: "Maximum update depth exceeded").
+  const refrescar = useCallback(() => setTick((t) => t + 1), []);
+  return { servicios, cargando, refrescar };
 }
 
 /** Solicitudes pendientes elegibles para el rol del gestor, ordenadas por cercanía. */

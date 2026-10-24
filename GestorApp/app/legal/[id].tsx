@@ -11,6 +11,7 @@ import FormInput from '@/components/(auth)/FormInput';
 import PrimaryButton from '@/components/(auth)/PrimaryButton';
 import { ClienteEditableFields, useClienteEditable } from '@/components/servicio/ClienteEditable';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
+import { subirEvidencias } from '@/domain/servicios/evidencias';
 import { completarServicio, marcarEnSitio } from '@/domain/servicios/servicios';
 import { useBottomInset } from '@/hooks/useBottomInset';
 import { useServicio } from '@/hooks/useServicios';
@@ -84,10 +85,17 @@ export default function FormularioLegalScreen() {
       notaGestor: notaFinal,
       clienteActualizado: cli.cambios,
     });
+    let avisoFotos = '';
+    if (evidencia) {
+      const evid = await subirEvidencias(servicio.id, { evidencia });
+      if (evid.fallidas > 0) avisoFotos = '\n⚠️ No se pudo subir la evidencia; verifica tu conexión.';
+    }
     setEnviando(false);
-    Alert.alert('✅ Diligencia registrada', `Resultado: ${RESULTADOS.find((r) => r.id === resultado)?.label}.`, [
-      { text: 'OK', onPress: () => router.back() },
-    ]);
+    Alert.alert(
+      '✅ Diligencia registrada',
+      `Resultado: ${RESULTADOS.find((r) => r.id === resultado)?.label}.${avisoFotos}`,
+      [{ text: 'OK', onPress: () => router.back() }],
+    );
   };
 
   if (!enSitio) {

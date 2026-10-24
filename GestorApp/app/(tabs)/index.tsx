@@ -6,12 +6,13 @@
 import ServiceCard from '@/components/ServiceCard';
 import { Colors as COLORS, Spacing as SPACING } from '@/constants/DesignTokens';
 import { useSesion } from '@/domain/auth/sesion';
+import { contarNoLeidas } from '@/domain/notificaciones/notificaciones';
 import { aceptarServicio } from '@/domain/servicios/servicios';
 import { useServiciosEnTiempoReal, useServiciosVisibles } from '@/hooks/useServicios';
 import { rolPuedeAceptar, RolGestor, Servicio, TipoServicio } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   ActivityIndicator,
@@ -35,6 +36,17 @@ const FILTROS: { id: FiltroTab; label: string }[] = [
   { id: 'verificacion', label: 'Verif.' },
   { id: 'legal', label: 'Legal' },
 ];
+
+/**
+ * El admin ve todos los filtros (con "Todos"); cada gestor solo ve las
+ * pestañas de los tipos que su rol puede aceptar, sin "Todos".
+ */
+function filtrosDeRol(rol: string | undefined): { id: FiltroTab; label: string }[] {
+  if (!rol || rol === 'admin') return FILTROS;
+  return FILTROS.filter(
+    (f) => f.id !== 'todos' && rolPuedeAceptar(rol as RolGestor, f.id as TipoServicio),
+  );
+}
 
 // ─── Componente de métricas ──────────────────────────────────────────────────
 
@@ -102,9 +114,10 @@ function EmptyServicios({ filtro }: { filtro: FiltroTab }) {
 
 export default function PanelServiciosScreen() {
   const { usuario } = useSesion();
-  const [filtroActivo, setFiltroActivo] = useState<FiltroTab>('todos');
+  const [filtroSel, setFiltroSel] = useState<FiltroTab | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [aceptandoId, setAceptandoId] = useState<string | null>(null);
+  const [noLeidas, setNoLeidas] = useState(0);
 
   // Cada quien ve solo lo suyo: el admin ve todo, un gestor ve sus propios
   // servicios (cualquier estado) + lo pendiente elegible para su rol.
@@ -112,6 +125,19 @@ export default function PanelServiciosScreen() {
 
   // Aparece un servicio nuevo elegible → notificación local + refetch.
   useServiciosEnTiempoReal(usuario, refrescar);
+
+  // Campana: contador de no leídas al entrar a la pantalla (callback estable).
+  const refrescarNoLeidas = useCallback(() => {
+    contarNoLeidas().then(setNoLeidas).catch(() => setNoLeidas(0));
+  }, []);
+  useFocusEffect(refrescarNoLeidas);
+
+  // Filtros: admin = todos; gestor = solo los tipos de su rol (sin "Todos").
+  const filtros = useMemo(() => filtrosDeRol(usuario?.rol), [usuario?.rol]);
+  const filtroActivo: FiltroTab = useMemo(() => {
+    if (filtroSel && filtros.some((f) => f.id === filtroSel)) return filtroSel;
+    return filtros[0]?.id ?? 'todos';
+  }, [filtroSel, filtros]);
 
   const serviciosFiltrados = useMemo<Servicio[]>(() => {
     if (filtroActivo === 'todos') return visibles;
@@ -123,6 +149,7 @@ export default function PanelServiciosScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     refrescar();
+    refrescarNoLeidas();
     setTimeout(() => setRefreshing(false), 600);
   };
 
@@ -158,10 +185,18 @@ export default function PanelServiciosScreen() {
             })}
           </Text>
         </View>
-        <Pressable style={styles.notifBtn}>
-          {/* TODO: pantalla de notificaciones. Por ahora no hay lista, solo detalle por id (app/notificacion/[id]). */}
+        <Pressable
+          style={styles.notifBtn}
+          onPress={() => {
+            router.push('/notificaciones');
+            setTimeout(refrescarNoLeidas, 400);
+          }}>
           <Ionicons name="notifications-outline" size={22} color={COLORS.textPrimary} />
-          <View style={styles.notifDot} />
+          {noLeidas > 0 && (
+            <View style={styles.notifDot}>
+              <Text style={styles.notifDotText}>{noLeidas > 9 ? '9+' : noLeidas}</Text>
+            </View>
+          )}
         </Pressable>
       </View>
 
@@ -170,11 +205,11 @@ export default function PanelServiciosScreen() {
 
       {/* Tabs de filtro */}
       <View style={styles.tabsRow}>
-        {FILTROS.map((f) => (
+        {filtros.map((f) => (
           <Pressable
             key={f.id}
             style={[styles.tab, filtroActivo === f.id && styles.tabActive]}
-            onPress={() => setFiltroActivo(f.id)}>
+            onPress={() => setFiltroSel(f.id)}>
             <Text style={[styles.tabText, filtroActivo === f.id && styles.tabTextActive]}>
               {f.label}
             </Text>
@@ -253,13 +288,17 @@ const styles = StyleSheet.create({
   },
   notifDot: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    top: 3,
+    right: 1,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
     backgroundColor: COLORS.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  notifDotText: { color: '#fff', fontSize: 9, fontWeight: '800' },
   metricasContainer: {
     backgroundColor: COLORS.surface,
     borderBottomWidth: 0.5,

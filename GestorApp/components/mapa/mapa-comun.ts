@@ -41,3 +41,14 @@ export interface MapaPinsProps {
   alto?: number;
   ancho: number;
 }
+
+/** Ruta "de ti al servicio": 2 pines + línea recta (la ruta real por calles
+ *  la abren los botones de Navegar vía app de Google Maps). */
+export interface MapaRutaProps {
+  /** Ubicación del servicio/cliente. */
+  destino: { lat: number; lng: number; titulo: string; descripcion?: string };
+  /** Ubicación del gestor; null = aún sin GPS (solo se pinta el destino). */
+  origen: { lat: number; lng: number } | null;
+  alto?: number;
+  ancho: number;
+}

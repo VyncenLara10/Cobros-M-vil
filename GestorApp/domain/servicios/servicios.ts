@@ -12,6 +12,7 @@
 
 import { buscarCliente as buscarClienteMock, ClienteDB } from '@/data/clientesMock';
 import * as Mocks from '@/data/mocks';
+import { registrarEvento } from '@/domain/servicios/eventos';
 import { supabase, supabaseConfigurado } from '@/lib/supabase';
 import * as Location from 'expo-location';
 import {
@@ -534,6 +535,7 @@ export async function aceptarServicio(
     .maybeSingle();
   if (error) return { ok: false, error: error.message };
   if (!data) return { ok: false, error: 'Este servicio ya fue tomado por otro gestor.' };
+  registrarEvento(servicioId, 'aceptado');
   return { ok: true };
 }
 
@@ -554,6 +556,7 @@ export async function rechazarServicio(
   if (!data) return { ok: false, error: 'Este servicio ya no está asignado a ti.' };
   // Historial: por qué se devolvió (queda visible para el admin).
   await registrarIntento(servicioId, 'rechazado', 'El gestor devolvió el servicio al pool.');
+  registrarEvento(servicioId, 'rechazado');
   return { ok: true };
 }
 
@@ -565,13 +568,23 @@ export async function registrarIntento(
   geolocalizacion?: string,
 ): Promise<void> {
   if (!supabaseConfigurado) return;
+  // Si no viene la geolocalización, la captura el dispositivo (mejor esfuerzo)
+  // y se guarda también en el intento y en el evento de actividad.
+  let geo = geolocalizacion?.trim() || null;
+  let pos: { lat: number; lng: number } | null | undefined;
+  if (!geo) {
+    pos = await obtenerPosicionActual();
+    if (pos) geo = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
+  }
   const { error } = await supabase.from('intentos_servicio').insert({
     servicio_id: servicioId,
     resultado,
     nota: nota?.trim() || null,
-    geolocalizacion: geolocalizacion ?? null,
+    geolocalizacion: geo,
   });
   if (error) console.warn('[servicios] registrarIntento', error.message);
+  // 'rechazado' lo registra rechazarServicio con su propia etiqueta.
+  if (resultado !== 'rechazado') registrarEvento(servicioId, `intento_${resultado}`, pos);
 }
 
 /** Registra pagos recuperados por banco (tabla pagos). */
@@ -592,6 +605,7 @@ export async function registrarPagos(
     })),
   );
   if (error) return { ok: false, error: error.message };
+  registrarEvento(servicioId, 'pago');
   return { ok: true };
 }
 
@@ -626,6 +640,7 @@ export async function escalarALegal(servicioId: string): Promise<{ ok: boolean; 
     })
     .eq('id', servicioId);
   if (error) return { ok: false, error: error.message };
+  registrarEvento(servicioId, 'escalado_legal');
   return { ok: true };
 }
 
@@ -641,6 +656,7 @@ export async function marcarEnSitio(servicioId: string): Promise<void> {
   }
   const { error } = await supabase.from('servicios').update({ fase: 'en_sitio' }).eq('id', servicioId);
   if (error) console.warn('[servicios] marcarEnSitio', error.message);
+  else registrarEvento(servicioId, 'en_sitio');
 }
 
 function patchCliente(cambios?: Partial<Cliente>): Record<string, any> {
@@ -673,6 +689,7 @@ export async function completarServicio(
     .update({ estado: estadoFinal, fase: null, notas: notasFinal })
     .eq('id', servicio.id);
   if (error) console.warn('[servicios] completarServicio', error.message);
+  else registrarEvento(servicio.id, estadoFinal);
 
   const patch = patchCliente(extra?.clienteActualizado);
   if (Object.keys(patch).length > 0 && servicio.cliente.clienteId) {
@@ -703,6 +720,7 @@ export async function marcarEnSitioParte(servicio: Servicio, sub: SubtipoVerific
   const nuevo = { ...actual, [sub]: { ...(actual[sub] ?? { enSitio: false, completado: false }), enSitio: true } };
   const { error } = await supabase.from('servicios').update({ partes_estado: nuevo }).eq('id', servicio.id);
   if (error) console.warn('[servicios] marcarEnSitioParte', error.message);
+  else registrarEvento(servicio.id, 'en_sitio');
 }
 
 export async function completarParte(
@@ -736,6 +754,7 @@ export async function completarParte(
 
   const { error } = await supabase.from('servicios').update(patchServicio).eq('id', servicio.id);
   if (error) console.warn('[servicios] completarParte', error.message);
+  else if (completoTodo) registrarEvento(servicio.id, 'completado');
 
   const patch = patchCliente(extra?.clienteActualizado);
   if (Object.keys(patch).length > 0 && servicio.cliente.clienteId) {

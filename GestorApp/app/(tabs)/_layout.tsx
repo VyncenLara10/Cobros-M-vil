@@ -12,10 +12,9 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerShown: true,
-        headerStyle: { backgroundColor: Colors.surface },
-        headerTintColor: Colors.textPrimary,
-        headerShadowVisible: false,
+        // Sin barra nativa arriba: cada pantalla muestra su propio título en
+        // el contenido (evita el título duplicado).
+        headerShown: false,
         tabBarStyle: {
           backgroundColor: Colors.surface,
           borderTopColor: Colors.border,

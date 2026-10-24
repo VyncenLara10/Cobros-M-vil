@@ -31,16 +31,10 @@ export default function RootLayout() {
         <Stack.Screen name="login" />
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen
-          name="servicio/[id]"
-          options={{
-            headerShown: true,
-            headerTitle: 'Detalle del servicio',
-            headerStyle: { backgroundColor: Colors.surface },
-            headerTintColor: Colors.textPrimary,
-            headerShadowVisible: false,
-          }}
-        />
+        {/* Sin header nativo: el detalle ya trae su botón "← Mis servicios"
+            y su propio contenido; seguridad sí conserva su header (no tiene
+            botón de regreso propio). */}
+        <Stack.Screen name="servicio/[id]" options={{ headerShown: false }} />
         <Stack.Screen
           name="seguridad"
           options={{
@@ -51,6 +45,7 @@ export default function RootLayout() {
             headerShadowVisible: false,
           }}
         />
+        <Stack.Screen name="notificaciones" options={{ headerShown: false }} />
         <Stack.Screen name="+not-found" />
       </Stack>
     </SesionProvider>

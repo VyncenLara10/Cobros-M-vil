@@ -1,6 +1,9 @@
 import { BadgeEstado, BadgeTipo, DetailRow } from '@/components/UI';
+import ModalRuta from '@/components/ModalRuta';
 import { Colors as COLORS, Radius as RADIUS, Spacing as SPACING } from '@/constants/DesignTokens';
 import { useSesion } from '@/domain/auth/sesion';
+import { cargarEventos, EventoServicio } from '@/domain/servicios/eventos';
+import { cargarEvidencias, EvidenciaServicio } from '@/domain/servicios/evidencias';
 import {
   escalarALegal,
   marcarNoLocalizado,
@@ -12,10 +15,11 @@ import { useServicio } from '@/hooks/useServicios';
 import { ESTADO_LABEL } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -185,8 +189,28 @@ export default function DetalleServicioScreen() {
   const { usuario } = useSesion();
   const [modalPago, setModalPago] = useState(false);
   const [modalIntento, setModalIntento] = useState(false);
+  const [modalRuta, setModalRuta] = useState(false);
+  const [eventos, setEventos] = useState<EventoServicio[]>([]);
+  const [evidencias, setEvidencias] = useState<EvidenciaServicio[]>([]);
+  const [evidenciaAbierta, setEvidenciaAbierta] = useState<string | null>(null);
 
   const { servicio, cargando, refrescar } = useServicio(id as string | undefined);
+
+  // Actividad (hora + GPS por acción) y evidencias del servicio. Se recargan
+  // cada vez que el servicio se refresca.
+  useEffect(() => {
+    if (!servicio) return;
+    let cancelado = false;
+    cargarEventos(servicio.id).then((e) => {
+      if (!cancelado) setEventos(e);
+    });
+    cargarEvidencias(servicio.id).then((ev) => {
+      if (!cancelado) setEvidencias(ev);
+    });
+    return () => {
+      cancelado = true;
+    };
+  }, [servicio]);
 
   if (cargando) {
     return (
@@ -289,11 +313,11 @@ export default function DetalleServicioScreen() {
           <Text style={styles.backText}>Mis servicios</Text>
         </Pressable>
 
-        {/* Badges + ID */}
+        {/* Badges + ID (solo el admin ve el identificador) */}
         <View style={styles.badgeRow}>
           <BadgeTipo tipo={servicio.tipo} />
           <BadgeEstado estado={servicio.estado} />
-          <Text style={styles.idText}>{servicio.id}</Text>
+          {usuario?.rol === 'admin' && <Text style={styles.idText}>{servicio.id}</Text>}
         </View>
 
         {/* Nombre del cliente */}
@@ -343,6 +367,17 @@ export default function DetalleServicioScreen() {
           )}
         </View>
 
+        {/* ── Cómo llegar (mapa + ruta real vía Google Maps) ── */}
+        <View style={styles.actionsSection}>
+          <ActionBtn
+            icon="navigate-outline"
+            label="Cómo llegar (ruta)"
+            color={COLORS.info}
+            bg={`${COLORS.info}15`}
+            onPress={() => setModalRuta(true)}
+          />
+        </View>
+
         {/* ── Historial de intentos ── */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
@@ -373,6 +408,46 @@ export default function DetalleServicioScreen() {
             ))
           )}
         </View>
+
+        {/* ── Evidencias (fotos subidas por el gestor) ── */}
+        {evidencias.length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>EVIDENCIAS ({evidencias.length})</Text>
+            <View style={styles.evidenciasGrid}>
+              {evidencias.map((ev) => (
+                <Pressable key={ev.id} style={styles.evidenciaThumb} onPress={() => setEvidenciaAbierta(ev.url)}>
+                  <Image source={{ uri: ev.url }} style={styles.evidenciaImg} />
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.evidenciaNota}>Toca una foto para verla completa.</Text>
+          </View>
+        )}
+
+        {/* ── Actividad: hora + ubicación de cada acción ── */}
+        {eventos.length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>ACTIVIDAD ({eventos.length})</Text>
+            {eventos.map((ev, i) => (
+              <View key={ev.id} style={styles.intentoRow}>
+                <View style={styles.intentoTimeline}>
+                  <View style={[styles.intentoDot, { backgroundColor: COLORS.info }]} />
+                  {i < eventos.length - 1 && <View style={styles.intentoLine} />}
+                </View>
+                <View style={styles.intentoContent}>
+                  <View style={styles.intentoHeader}>
+                    <Text style={styles.intentoResultado}>{ev.etiqueta}</Text>
+                    <Text style={styles.intentoFecha}>{ev.fecha}</Text>
+                  </View>
+                  <Text style={styles.intentoNota}>{ev.gestor}</Text>
+                  {ev.lat != null && ev.lng != null && (
+                    <Text style={styles.intentoGeo}>📍 {ev.lat.toFixed(5)}, {ev.lng.toFixed(5)}</Text>
+                  )}
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* ── Acciones (solo si está activo/pendiente) ── */}
         {estaActivo && (
@@ -465,6 +540,30 @@ export default function DetalleServicioScreen() {
         onConfirmar={handleIntentoFallido}
         onCerrar={() => setModalIntento(false)}
       />
+      <ModalRuta
+        visible={modalRuta}
+        destino={{
+          lat: servicio.cliente.lat,
+          lng: servicio.cliente.lng,
+          titulo: servicio.cliente.nombre,
+          direccion: `${servicio.cliente.direccion}, ${servicio.cliente.zona}`,
+        }}
+        onCerrar={() => setModalRuta(false)}
+      />
+      <Modal
+        visible={!!evidenciaAbierta}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEvidenciaAbierta(null)}>
+        <View style={styles.visorOverlay}>
+          <Pressable style={styles.visorCerrar} onPress={() => setEvidenciaAbierta(null)}>
+            <Ionicons name="close" size={26} color="#fff" />
+          </Pressable>
+          {evidenciaAbierta ? (
+            <Image source={{ uri: evidenciaAbierta }} style={styles.visorImg} resizeMode="contain" />
+          ) : null}
+        </View>
+      </Modal>
     </>
   );
 }
@@ -535,6 +634,36 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   estadoFinalText: { fontSize: 15, fontWeight: '700' },
+
+  // Evidencias
+  evidenciasGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+  evidenciaThumb: {
+    width: 76,
+    height: 76,
+    borderRadius: RADIUS.md,
+    overflow: 'hidden',
+    backgroundColor: COLORS.surfaceAlt,
+    borderWidth: 0.5,
+    borderColor: COLORS.border,
+  },
+  evidenciaImg: { width: '100%', height: '100%' },
+  evidenciaNota: { fontSize: 11, color: COLORS.textMuted, marginTop: SPACING.sm },
+
+  // Visor de evidencia a pantalla completa
+  visorOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
+  visorImg: { width: '100%', height: '80%' },
+  visorCerrar: {
+    position: 'absolute',
+    top: 48,
+    right: 20,
+    zIndex: 2,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   // Not found
   notFound: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },

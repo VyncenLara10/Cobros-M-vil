@@ -142,6 +142,7 @@ export default function AprobacionesScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: bottomInset + 32 }]}>
+      <Text style={styles.pageTitle}>Aprobación de gestores</Text>
       <Text style={styles.headerSub}>
         {pendientes.length === 0
           ? 'No hay solicitudes pendientes.'
@@ -332,6 +333,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
   cargandoBox: { alignItems: 'center', justifyContent: 'center' },
   content: { padding: Spacing.lg },
+  pageTitle: { ...Typography.title, color: Colors.textPrimary, marginBottom: Spacing.sm },
   headerSub: { ...Typography.caption, color: Colors.textSecondary, marginBottom: Spacing.lg },
 
   emptyState: { alignItems: 'center', paddingVertical: Spacing.xxl, gap: Spacing.sm },

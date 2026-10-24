@@ -189,6 +189,36 @@ create table public.pagos (
   creado_en timestamptz not null default now()
 );
 
+-- ─── Fase 5: historial de acciones (hora + GPS) ────────────────────────────
+-- Una fila por cada cosa que hace el gestor con el servicio (aceptar,
+-- rechazar, intento, pago, en sitio, completar, escalar…), con la hora y la
+-- ubicación del dispositivo en ese momento.
+create table public.eventos_servicio (
+  id uuid primary key default gen_random_uuid(),
+  servicio_id uuid not null references public.servicios(id) on delete cascade,
+  perfil_id uuid references public.perfiles(id) on delete set null default auth.uid(),
+  accion text not null,
+  lat double precision,
+  lng double precision,
+  creado_en timestamptz not null default now()
+);
+create index eventos_servicio_servicio_idx
+  on public.eventos_servicio (servicio_id, creado_en desc);
+
+-- ─── Fase 5: evidencias (fotos) ─────────────────────────────────────────────
+-- Registro de las fotos que el gestor sube al completar; el archivo en sí vive
+-- en el bucket privado "documentos" (ver storage abajo).
+create table public.evidencias_servicio (
+  id uuid primary key default gen_random_uuid(),
+  servicio_id uuid not null references public.servicios(id) on delete cascade,
+  clave text not null,
+  ruta_storage text not null,
+  subido_por uuid references public.perfiles(id) on delete set null default auth.uid(),
+  creado_en timestamptz not null default now()
+);
+create index evidencias_servicio_servicio_idx
+  on public.evidencias_servicio (servicio_id);
+
 -- ─── Seguimiento en vivo (panel de admin) ───────────────────────────────────
 
 create table public.ubicaciones_gestor (
@@ -344,6 +374,8 @@ alter table public.solicitudes_registro enable row level security;
 alter table public.notificaciones enable row level security;
 alter table public.push_tokens enable row level security;
 alter table public.pagos enable row level security;
+alter table public.eventos_servicio enable row level security;
+alter table public.evidencias_servicio enable row level security;
 
 -- ── perfiles ──────────────────────────────────────────────────────────────
 -- Cada quien lee/edita su propio perfil; el admin ve y aprueba a todos
@@ -441,6 +473,22 @@ create policy "notificaciones broadcast por rol" on public.notificaciones
   for select using (perfil_id is null and rol_destino = public.rol_de(auth.uid()));
 create policy "staff crea notificaciones" on public.notificaciones
   for insert to authenticated with check (true);
+-- Fase 5: marcar como leída (propias o broadcast de mi rol) y campana del admin.
+create policy "actualizar mis notificaciones" on public.notificaciones
+  for update to authenticated
+  using (
+    perfil_id = auth.uid()
+    or (perfil_id is null and rol_destino = public.rol_de(auth.uid()))
+    or public.es_admin()
+  )
+  with check (
+    perfil_id = auth.uid()
+    or (perfil_id is null and rol_destino = public.rol_de(auth.uid()))
+    or public.es_admin()
+  );
+create policy "admin ve todas las notificaciones" on public.notificaciones
+  for select to authenticated
+  using (public.es_admin());
 
 create policy "mis push tokens" on public.push_tokens
   for all using (perfil_id = auth.uid());
@@ -463,6 +511,53 @@ create policy "gestor registra pagos" on public.pagos
     and exists (
       select 1 from public.servicios s
       where s.id = pagos.servicio_id and s.gestor_id = auth.uid()
+    )
+  );
+
+-- ── eventos_servicio (fase 5) ────────────────────────────────────────────────
+create policy "ver eventos de mis servicios" on public.eventos_servicio
+  for select to authenticated
+  using (
+    public.es_admin()
+    or exists (
+      select 1 from public.servicios s
+      where s.id = eventos_servicio.servicio_id and s.gestor_id = auth.uid()
+    )
+  );
+create policy "registrar mis eventos" on public.eventos_servicio
+  for insert to authenticated
+  with check (
+    perfil_id = auth.uid()
+    and (
+      public.es_admin()
+      or exists (
+        select 1 from public.servicios s
+        where s.id = eventos_servicio.servicio_id
+          and (s.gestor_id = auth.uid() or s.estado = 'pendiente')
+      )
+    )
+  );
+
+-- ── evidencias_servicio (fase 5) ─────────────────────────────────────────────
+create policy "ver evidencias de mis servicios" on public.evidencias_servicio
+  for select to authenticated
+  using (
+    public.es_admin()
+    or exists (
+      select 1 from public.servicios s
+      where s.id = evidencias_servicio.servicio_id and s.gestor_id = auth.uid()
+    )
+  );
+create policy "subir mis evidencias" on public.evidencias_servicio
+  for insert to authenticated
+  with check (
+    subido_por = auth.uid()
+    and (
+      public.es_admin()
+      or exists (
+        select 1 from public.servicios s
+        where s.id = evidencias_servicio.servicio_id and s.gestor_id = auth.uid()
+      )
     )
   );
 
