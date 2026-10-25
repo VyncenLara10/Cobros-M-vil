@@ -8,6 +8,24 @@
 import { Colors } from '@/constants/DesignTokens';
 import { EstadoParada, Parada } from '@/data/seguimiento';
 
+/**
+ * Interruptor TEMPORAL de los mapas NATIVOS (Android/iOS).
+ *
+ * Motivo: el mapa de Google sale negro en Android mientras el proyecto de
+ * Google Cloud no tenga Billing habilitado (Google rechaza los tiles →
+ * REQUEST_DENIED "You must enable Billing"). Mientras tanto, las variantes
+ * nativas muestran un mapa esquemático con pines en vez del cuadro negro.
+ * Las variantes web (.web.tsx, Leaflet/OpenStreetMap) NO lo usan: son gratis.
+ *
+ * ¿Cómo volver al mapa real? 3 pasos, sin tocar código:
+ *   1. Google Cloud → habilitar Billing + "Maps SDK for Android".
+ *   2. Borrar "EXPO_PUBLIC_MAPA_OFF" de eas.json (perfil preview).
+ *   3. Reconstruir el APK: eas build -p android --profile preview.
+ *
+ * Default (flag ausente): mapa real ACTIVO.
+ */
+export const MAPAS_OFF = process.env.EXPO_PUBLIC_MAPA_OFF === '1';
+
 export const COLOR_ESTADO: Record<EstadoParada, string> = {
   completado: Colors.success,
   no_localizado: Colors.danger,

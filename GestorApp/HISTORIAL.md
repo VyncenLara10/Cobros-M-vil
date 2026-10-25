@@ -90,11 +90,39 @@
 
 ---
 
+### Fase 6 (completada) — Mapa negro en Android: causa billing + switch temporal
+- **Diagnóstico (sin tocar código):** el manifest SÍ lleva la key
+  (`com.google.android.geo.API_KEY` desde el prebuild) y los componentes están bien.
+  La causa es la **key de prueba**: probada con curl contra Google responde
+  `REQUEST_DENIED: "You must enable Billing on the Google Cloud Project"` → sin billing
+  Google no sirve tiles → el MapView de Android queda **negro**. No hay forma de usar el
+  Maps SDK de Android sin habilitar Billing (aunque el crédito de US$200/mes cubre pruebas).
+- **Se probó la app en:** APK de EAS perfil `preview` (no hay build local gradle).
+- **Switch temporal `EXPO_PUBLIC_MAPA_OFF`** (solo afecta nativo/Android; web Leaflet/OSM
+  y Expo Go no lo ven):
+  - `components/mapa/mapa-comun.ts` → `MAPAS_OFF = process.env.EXPO_PUBLIC_MAPA_OFF === '1'`
+    con la doc de reversión. **Default (ausente) = mapa real.**
+  - `MapaSeguimiento.tsx` (admin) → esquemático existente (pines + ruta) + badge
+    *"Mapa apagado temporalmente · falta billing de Google"*.
+  - `MapaPins.tsx` (gestores) → **esquemático con pines de colores** (proyección lat/lng→xy,
+    conserva la leyenda verde/amarillo/gris de la pantalla).
+  - `MapaRuta.tsx` (cómo llegar) → **esquemático de 2 pines + línea**; el botón
+    "Navegar con Google Maps" (en `ModalRuta`) no depende del mapa y sigue funcionando.
+  - `eas.json` → `"EXPO_PUBLIC_MAPA_OFF": "1"` **solo en `preview.env`**; `production` sin flag.
+- **Reversión (sin tocar código):** 1) Google Cloud → habilitar **Billing** + **Maps SDK
+  for Android** (recomendado: restringir key a `com.tuempresa.cobranzagt` + SHA-1);
+  2) borrar la línea `EXPO_PUBLIC_MAPA_OFF` de `eas.json`; 3) `eas build -p android
+  --profile preview` → mapas reales de vuelta.
+- **Verificación:** `npx tsc --noEmit` y `npm run lint` (≤6). El cambio visual se confirma
+  reconstruyendo el APK preview (debe verse esquemático, no negro).
+
+---
+
 ## Pendientes conocidos del usuario
 1. Correr en SQL Editor: `supabase/fix-fase5.sql` y `supabase/fix-perfil-activar.sql`
    (además de `fix-modulos.sql` y `fix-perfil-registro.sql` si aún no).
-2. Build de Android: `npx expo run:android` (o `npx expo prebuild -p android` si cambia
-   `app.json`) — el manifest ya quedó con la key de Maps y teclado en modo pan.
+2. **Google Cloud (mapa):** habilitar Billing + Maps SDK for Android; después borrar
+   `EXPO_PUBLIC_MAPA_OFF` de `eas.json` y reconstruir el APK (ver reversión en fase 6).
 3. Bucket `documentos` (privado) en Storage si no existe (subida de evidencias).
 4. Regenerar tipos de rutas si se agregan pantallas nuevas: arrancar `npx expo start`
    un momento (escribe `.expo/types/router.d.ts`).

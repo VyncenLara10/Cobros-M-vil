@@ -13,7 +13,7 @@
  */
 
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
-import { COLOR_ESTADO, MapaProps } from '@/components/mapa/mapa-comun';
+import { COLOR_ESTADO, MAPAS_OFF, MapaProps } from '@/components/mapa/mapa-comun';
 import { Parada } from '@/data/seguimiento';
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
@@ -37,8 +37,12 @@ try {
   HAY_MAPA = false; // librería no instalada → se usa el esquemático
 }
 
+// Mapa real solo si la librería existe Y el interruptor temporal no lo apaga
+// (ver MAPAS_OFF en mapa-comun.ts: mapa negro por falta de billing en Google Cloud).
+const USAR_MAPA = HAY_MAPA && !MAPAS_OFF;
+
 export default function MapaSeguimiento(props: MapaProps) {
-  return HAY_MAPA ? <MapaReal {...props} /> : <MapaEsquematico {...props} />;
+  return USAR_MAPA ? <MapaReal {...props} /> : <MapaEsquematico {...props} />;
 }
 
 /** Encuadra todos los puntos con margen. */
@@ -157,7 +161,11 @@ function MapaEsquematico({ paradas, actual, alto = 220, ancho }: MapaProps) {
 
       <View style={styles.badge}>
         <View style={styles.badgeDot} />
-        <Text style={styles.badgeText}>Vista esquemática · instala react-native-maps</Text>
+        <Text style={styles.badgeText}>
+          {MAPAS_OFF
+            ? 'Mapa apagado temporalmente · falta billing de Google'
+            : 'Vista esquemática · instala react-native-maps'}
+        </Text>
       </View>
     </View>
   );
