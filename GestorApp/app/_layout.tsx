@@ -2,7 +2,7 @@ import { Colors } from '@/constants/DesignTokens';
 import { SesionProvider, useSesion } from '@/domain/auth/sesion';
 import { registrarPushToken } from '@/domain/notificaciones/push';
 import { useUbicacionTracking } from '@/hooks/useUbicacionTracking';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 
 /** Pide permiso de notificaciones y registra el push token al iniciar sesión. */
@@ -21,9 +21,38 @@ function SeguimientoUbicacion() {
   return null;
 }
 
+/** Rutas accesibles sin sesión (login, registro, callback de enlace mágico). */
+const RUTAS_PUBLICAS = ['login', '(auth)', 'auth', '+not-found'];
+
+/**
+ * Guard de sesión a nivel raíz:
+ *  - sin sesión → a /login (o /login modo MFA si la sesión está aal1);
+ *  - con sesión y parado en /login → adentro a /(tabs).
+ * Espera `cargando` para no patear al usuario mientras se restaura el token.
+ */
+function Guard() {
+  const { usuario, cargando } = useSesion();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (cargando) return;
+    const raiz = segments[0] as string | undefined;
+    const publica = !raiz || RUTAS_PUBLICAS.includes(raiz);
+    if (!usuario && !publica) {
+      router.replace('/login');
+    } else if (usuario && raiz === 'login') {
+      router.replace('/(tabs)');
+    }
+  }, [cargando, usuario, segments, router]);
+
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <SesionProvider>
+      <Guard />
       <RegistroPush />
       <SeguimientoUbicacion />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.background } }}>

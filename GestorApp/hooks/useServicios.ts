@@ -13,7 +13,8 @@
 import type { RolApp } from '@/domain/auth/sesion';
 import { notificarLocal } from '@/domain/notificaciones/push';
 import * as ServiciosDB from '@/domain/servicios/servicios';
-import { supabase, supabaseConfigurado } from '@/lib/supabase';
+import { suscribirse } from '@/hooks/realtime/suscripcionCompartida';
+import { supabaseConfigurado } from '@/lib/supabase';
 import { RolGestor, Servicio, TIPO_SERVICIO_LABEL, rolPuedeAceptar } from '@/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -95,6 +96,14 @@ export function useServiciosDeGestor(gestorId: string | undefined): EstadoLista 
   return useCargaServicios(() => (gestorId ? ServiciosDB.serviciosDeGestor(gestorId) : Promise.resolve([])), [gestorId]);
 }
 
+/** Casos escalados a legal por ese gestor: historial de solo lectura. */
+export function useServiciosEscalados(gestorId: string | undefined): EstadoLista {
+  return useCargaServicios(
+    () => (gestorId ? ServiciosDB.serviciosEscaladosPor(gestorId) : Promise.resolve([])),
+    [gestorId],
+  );
+}
+
 /** Todo lo que le corresponde ver a un usuario en su panel principal. */
 export function useServiciosVisibles(usuario: { id: string; rol: RolApp; zona?: string } | null): EstadoLista {
   const esGestor = !!usuario && usuario.rol !== 'admin';
@@ -132,12 +141,22 @@ export function useServicio(id: string | undefined) {
       return;
     }
     setCargando(true);
-    ServiciosDB.servicioPorId(id).then((data) => {
-      if (!cancelado) {
-        setServicio(data);
-        setCargando(false);
-      }
-    });
+    ServiciosDB.servicioPorId(id)
+      .then((data) => {
+        if (!cancelado) {
+          setServicio(data);
+          setCargando(false);
+        }
+      })
+      .catch((e) => {
+        // Nunca dejar una promesa rechazada sin manejar: en Android puede
+        // cerrar la app. Se marca la carga como terminada sin servicio.
+        console.warn('[servicios] error cargando servicio', id, e);
+        if (!cancelado) {
+          setServicio(undefined);
+          setCargando(false);
+        }
+      });
     return () => {
       cancelado = true;
     };
@@ -152,6 +171,10 @@ export function useServicio(id: string | undefined) {
  * pendiente + elegible para el rol, dispara notificación local y refetch.
  * Requiere que `servicios` esté en la publicación supabase_realtime
  * (supabase/fix-modulos.sql). El admin no lo necesita (ve todo y no reclama).
+ *
+ * La suscripción pasa por el registro compartido (refcount por topic/filtro):
+ * index y mi-perfil pueden estar montados a la vez sin duplicar canales ni
+ * desconectar el canal del otro al desmontar.
  */
 export function useServiciosEnTiempoReal(
   usuario: { id: string; rol: RolApp } | null,
@@ -163,30 +186,23 @@ export function useServiciosEnTiempoReal(
   useEffect(() => {
     if (!supabaseConfigurado || !usuario || usuario.rol === 'admin') return;
 
-    const canal = supabase
-      .channel(`servicios-${usuario.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'servicios' },
-        (payload) => {
-          const fila = payload.new as { estado?: string; tipo?: string } | null;
-          if (
-            fila?.estado === 'pendiente' &&
-            fila.tipo &&
-            rolPuedeAceptar(usuario.rol as RolGestor, fila.tipo as any)
-          ) {
-            notificarLocal(
-              '📋 Nuevo servicio disponible',
-              `Hay un nuevo servicio de ${TIPO_SERVICIO_LABEL[fila.tipo as keyof typeof TIPO_SERVICIO_LABEL]} para tu rol.`,
-            );
-            callbackRef.current();
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(canal);
-    };
+    return suscribirse(
+      `servicios-${usuario.id}`,
+      { event: 'INSERT', schema: 'public', table: 'servicios' },
+      (payload) => {
+        const fila = payload.new as { estado?: string; tipo?: string } | null;
+        if (
+          fila?.estado === 'pendiente' &&
+          fila.tipo &&
+          rolPuedeAceptar(usuario.rol as RolGestor, fila.tipo as any)
+        ) {
+          notificarLocal(
+            '📋 Nuevo servicio disponible',
+            `Hay un nuevo servicio de ${TIPO_SERVICIO_LABEL[fila.tipo as keyof typeof TIPO_SERVICIO_LABEL]} para tu rol.`,
+          );
+          callbackRef.current();
+        }
+      },
+    );
   }, [usuario?.id, usuario?.rol]);
 }

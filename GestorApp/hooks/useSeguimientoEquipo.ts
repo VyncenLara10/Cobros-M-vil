@@ -10,6 +10,7 @@
  */
 
 import { RECORRIDOS_HOY, RecorridoGestor, Parada, EstadoParada } from '@/data/seguimiento';
+import { suscribirse } from '@/hooks/realtime/suscripcionCompartida';
 import { supabase, supabaseConfigurado } from '@/lib/supabase';
 import { RolGestor, TipoServicio } from '@/types';
 import { useEffect, useState } from 'react';
@@ -118,16 +119,24 @@ export function useSeguimientoEquipo() {
     cargar();
     const intervalo = setInterval(cargar, 20_000);
 
-    const canal = supabase
-      .channel('seguimiento-admin')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ubicaciones_gestor' }, cargar)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'servicios' }, cargar)
-      .subscribe();
+    // Dos filtros sobre el mismo topic: el registro compartido crea un canal
+    // por (topic, filtro) y nunca vuelve a llamar .on() tras subscribe().
+    const desuscribirUbicaciones = suscribirse(
+      'seguimiento-admin',
+      { event: '*', schema: 'public', table: 'ubicaciones_gestor' },
+      cargar,
+    );
+    const desuscribirServicios = suscribirse(
+      'seguimiento-admin',
+      { event: '*', schema: 'public', table: 'servicios' },
+      cargar,
+    );
 
     return () => {
       cancelado = true;
       clearInterval(intervalo);
-      supabase.removeChannel(canal);
+      desuscribirUbicaciones();
+      desuscribirServicios();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -134,6 +134,8 @@ create table public.servicios (
   comision_pct numeric(5,2) not null default 0,
   comision_calculada numeric(12,2) not null default 0,
   gestor_id uuid references public.perfiles(id),
+  -- Quién escaló el caso a gestión legal (historial de solo lectura).
+  escalado_por uuid references public.perfiles(id) on delete set null,
   fecha_asignacion timestamptz not null default now(),
   fecha_limite timestamptz,
   subtipos_verificacion text[],                  -- ['domiciliar','laboral']
@@ -205,19 +207,40 @@ create table public.eventos_servicio (
 create index eventos_servicio_servicio_idx
   on public.eventos_servicio (servicio_id, creado_en desc);
 
+-- ─── Fase 6: informe PDF del caso ────────────────────────────────────────────
+-- Una fila por PDF generado (expo-print en el cliente); el archivo vive en el
+-- bucket documentos. Insert/update/delete solo vía las funciones security
+-- definer de más abajo.
+create table public.informes_servicio (
+  id uuid primary key default gen_random_uuid(),
+  servicio_id uuid not null references public.servicios(id) on delete cascade,
+  generado_por uuid references public.perfiles(id) on delete set null default auth.uid(),
+  ruta_pdf text not null,
+  creado_en timestamptz not null default now()
+);
+
 -- ─── Fase 5: evidencias (fotos) ─────────────────────────────────────────────
 -- Registro de las fotos que el gestor sube al completar; el archivo en sí vive
--- en el bucket privado "documentos" (ver storage abajo).
+-- en el bucket privado "documentos" (ver storage abajo). Al archivar (fase 6)
+-- la fila queda en estado 'archivada' con la copia en ruta_archivo; la copia
+-- de archivo se coloca en `<dueno>/archivo_evidencias/<servicioId>/…`.
 create table public.evidencias_servicio (
   id uuid primary key default gen_random_uuid(),
   servicio_id uuid not null references public.servicios(id) on delete cascade,
   clave text not null,
   ruta_storage text not null,
   subido_por uuid references public.perfiles(id) on delete set null default auth.uid(),
-  creado_en timestamptz not null default now()
+  creado_en timestamptz not null default now(),
+  estado text not null default 'activa'
+    check (estado in ('activa', 'archivada')),
+  ruta_archivo text,
+  archivada_en timestamptz,
+  informe_id uuid references public.informes_servicio(id) on delete set null
 );
 create index evidencias_servicio_servicio_idx
   on public.evidencias_servicio (servicio_id);
+create index evidencias_servicio_estado_idx
+  on public.evidencias_servicio (servicio_id, estado);
 
 -- ─── Seguimiento en vivo (panel de admin) ───────────────────────────────────
 
@@ -257,6 +280,30 @@ create table public.notificaciones (
   leida boolean not null default false,
   enviada_en timestamptz not null default now()
 );
+
+-- Push de negocio SERVER-SIDE: 1 fila de outbox por destinatario de cada
+-- notificación (tickets, reintentos y recibos de Expo). Trigger + pg_net +
+-- cron viven en supabase/fix-push-server.sql (aplicar una vez); RLS cerrado,
+-- solo lo escriben las funciones security definer.
+create table public.push_outbox (
+  id uuid primary key default gen_random_uuid(),
+  notificacion_id uuid not null references public.notificaciones(id) on delete cascade,
+  perfil_id uuid not null references public.perfiles(id) on delete cascade,
+  expo_push_token text not null,
+  orden integer not null default 0,
+  request_id bigint,
+  recibo_request_id bigint,
+  ticket_id text,
+  estado text not null default 'pendiente'
+    check (estado in ('pendiente','enviado','ticket_ok','error','entregado','error_recepcion')),
+  mensaje text,
+  intentos integer not null default 0,
+  creado_en timestamptz not null default now(),
+  enviado_en timestamptz,
+  actualizado_en timestamptz not null default now()
+);
+create index push_outbox_estado_idx on public.push_outbox (estado, creado_en);
+create index push_outbox_notif_idx on public.push_outbox (notificacion_id);
 
 -- ============================================================================
 -- Seguridad de acceso: intentos, bloqueo y códigos OTP
@@ -373,6 +420,7 @@ alter table public.ubicaciones_gestor enable row level security;
 alter table public.solicitudes_registro enable row level security;
 alter table public.notificaciones enable row level security;
 alter table public.push_tokens enable row level security;
+alter table public.push_outbox enable row level security;
 alter table public.pagos enable row level security;
 alter table public.eventos_servicio enable row level security;
 alter table public.evidencias_servicio enable row level security;
@@ -433,20 +481,33 @@ create policy "crear intento en mi servicio" on public.intentos_servicio
 -- El admin ve/edita todo. Un gestor ve y edita SOLO lo suyo (gestor_id =
 -- su uid) o lo pendiente sin asignar cuyo tipo le corresponde a su rol
 -- (rol_elegible) — así puede "tomarlo" (UPDATE que le asigna gestor_id).
+-- Escalado a legal: el escalador conserva SOLO LECTURA vía escalado_por, los
+-- abogados ven todos los legales y pueden tomarlos/editarlos (fix-escalado-legal).
 -- Cualquier miembro activo del staff puede publicar una solicitud nueva.
-create policy "ver servicios propios, elegibles o admin" on public.servicios
+create policy "ver servicios propios, elegibles, escalados o admin" on public.servicios
   for select to authenticated using (
     public.es_admin()
     or gestor_id = auth.uid()
+    or escalado_por = auth.uid()
+    or (public.rol_de(auth.uid()) = 'abogado' and tipo = 'legal')
     or (gestor_id is null and estado = 'pendiente' and public.rol_elegible(public.rol_de(auth.uid()), tipo))
   );
 create policy "crear servicio" on public.servicios
   for insert to authenticated with check (true);
-create policy "actualizar servicio propio, reclamar pendiente, o admin" on public.servicios
-  for update to authenticated using (
+create policy "actualizar servicio, reclamar o escalar" on public.servicios
+  for update to authenticated
+  using (
     public.es_admin()
     or gestor_id = auth.uid()
+    or (public.rol_de(auth.uid()) = 'abogado' and tipo = 'legal')
     or (gestor_id is null and estado = 'pendiente' and public.rol_elegible(public.rol_de(auth.uid()), tipo))
+  )
+  with check (
+    public.es_admin()
+    or (gestor_id is not null and gestor_id = auth.uid())
+    or (public.rol_de(auth.uid()) = 'abogado' and tipo = 'legal')
+    or (gestor_id is null and estado = 'pendiente' and public.rol_elegible(public.rol_de(auth.uid()), tipo))
+    or escalado_por = auth.uid()
   );
 
 -- ── ubicaciones_gestor (seguimiento en vivo del panel de admin) ──────────
@@ -561,6 +622,18 @@ create policy "subir mis evidencias" on public.evidencias_servicio
     )
   );
 
+-- ── informes_servicio (fase 6) ──────────────────────────────────────────────
+-- Escritura reservada a confirmar_informe_y_archivar / restaurar_evidencias.
+create policy "ver informes de mis servicios" on public.informes_servicio
+  for select to authenticated
+  using (
+    public.es_admin()
+    or exists (
+      select 1 from public.servicios s
+      where s.id = informes_servicio.servicio_id and s.gestor_id = auth.uid()
+    )
+  );
+
 -- ── Realtime ────────────────────────────────────────────────────────────────
 -- Panel de admin (ubicaciones en vivo) y canales de gestores (servicios
 -- nuevos) usan postgres_changes; las tablas deben estar en la publicación.
@@ -607,3 +680,182 @@ create policy "ver mis documentos" on storage.objects
 create policy "admin ve todos los documentos" on storage.objects
   for select to authenticated
   using (bucket_id = 'documentos' and public.es_admin());
+
+-- ── Fase 6: archivado de evidencias (storage) ───────────────────────────────
+
+-- La RPC security definer (owner = postgres) lee storage.objects para validar
+-- origen/destino/PDF antes de archivar.
+create policy "lectura de archivado para postgres" on storage.objects
+  for select to postgres
+  using (bucket_id = 'documentos');
+
+-- Tras archivar, el cliente quita el original de SU carpeta; el admin sube y
+-- borra en cualquier carpeta (archiva casos de cualquier gestor).
+create policy "borro mis documentos" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'documentos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "admin sube a cualquier carpeta" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'documentos' and public.es_admin());
+
+create policy "admin borra documentos" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'documentos' and public.es_admin());
+
+do $$ begin
+  grant select on storage.objects to postgres;
+exception when others then null; end $$;
+
+-- ── Fase 6: informe PDF + archivado/restauración de evidencias ──────────────
+-- El cliente genera el PDF con expo-print, verifica que todas las fotos quedaron
+-- incrustadas, sube el PDF, copia las evidencias a
+-- `<dueno>/archivo_evidencias/<servicioId>/…` y llama a la RPC; recién entonces
+-- borra los originales. Ver supabase/fix-pdf-informes.sql (comentario detallado).
+
+create or replace function public.confirmar_informe_y_archivar(
+  p_servicio uuid,
+  p_ruta_pdf text,
+  p_archivos jsonb
+) returns uuid
+language plpgsql
+security definer
+set search_path = public, storage
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_gestor uuid;
+  v_informe uuid;
+  v_activas int;
+  v_mapeadas int;
+  v_orig text;
+  v_dest text;
+begin
+  if v_uid is null then
+    raise exception 'no autenticado';
+  end if;
+
+  select gestor_id into v_gestor from public.servicios where id = p_servicio;
+  if not found then
+    raise exception 'servicio no existe';
+  end if;
+  if not (public.es_admin() or v_gestor = v_uid) then
+    raise exception 'sin permiso para archivar este servicio';
+  end if;
+
+  if p_ruta_pdf is null or p_ruta_pdf !~* '\.pdf$' then
+    raise exception 'falta el PDF del informe';
+  end if;
+  perform 1 from storage.objects
+   where bucket_id = 'documentos' and name = p_ruta_pdf
+     and coalesce((metadata ->> 'size')::bigint, 0) > 0;
+  if not found then
+    raise exception 'el PDF no está en storage: %', p_ruta_pdf;
+  end if;
+
+  select count(*) into v_activas
+    from public.evidencias_servicio
+   where servicio_id = p_servicio and estado = 'activa';
+  if v_activas = 0 then
+    raise exception 'no hay evidencias activas que archivar';
+  end if;
+
+  v_mapeadas := coalesce(jsonb_array_length(p_archivos), 0);
+  if v_mapeadas <> v_activas then
+    raise exception 'mapeo incompleto: % evidencias activas, % mapeadas', v_activas, v_mapeadas;
+  end if;
+
+  for i in 0 .. v_mapeadas - 1 loop
+    v_orig := p_archivos -> i ->> 'original';
+    v_dest := p_archivos -> i ->> 'archivo';
+
+    perform 1 from public.evidencias_servicio
+     where servicio_id = p_servicio and estado = 'activa' and ruta_storage = v_orig;
+    if not found then
+      raise exception 'la evidencia no pertenece al servicio: %', coalesce(v_orig, '(null)');
+    end if;
+
+    perform 1 from storage.objects
+     where bucket_id = 'documentos' and name = v_orig
+       and coalesce((metadata ->> 'size')::bigint, 0) > 0;
+    if not found then
+      raise exception 'origen ilegible en storage: %', coalesce(v_orig, '(null)');
+    end if;
+
+    perform 1 from storage.objects
+     where bucket_id = 'documentos' and name = v_dest
+       and coalesce((metadata ->> 'size')::bigint, 0) > 0;
+    if not found then
+      raise exception 'destino ilegible en storage: %', coalesce(v_dest, '(null)');
+    end if;
+
+    if position('/archivo_evidencias/' in coalesce(v_dest, '')) = 0 then
+      raise exception 'destino fuera de archivo_evidencias: %', v_dest;
+    end if;
+  end loop;
+
+  insert into public.informes_servicio (servicio_id, generado_por, ruta_pdf)
+  values (p_servicio, v_uid, p_ruta_pdf)
+  returning id into v_informe;
+
+  for i in 0 .. v_mapeadas - 1 loop
+    update public.evidencias_servicio
+       set estado = 'archivada',
+           ruta_archivo = p_archivos -> i ->> 'archivo',
+           archivada_en = now(),
+           informe_id = v_informe
+     where servicio_id = p_servicio
+       and estado = 'activa'
+       and ruta_storage = p_archivos -> i ->> 'original';
+  end loop;
+
+  return v_informe;
+end;
+$$;
+
+create or replace function public.restaurar_evidencias(p_servicio uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public, storage
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_gestor uuid;
+  v_ok int;
+  r record;
+begin
+  if v_uid is null then
+    raise exception 'no autenticado';
+  end if;
+
+  select gestor_id into v_gestor from public.servicios where id = p_servicio;
+  if not found then
+    raise exception 'servicio no existe';
+  end if;
+  if not (public.es_admin() or v_gestor = v_uid) then
+    raise exception 'sin permiso para restaurar este servicio';
+  end if;
+
+  for r in
+    select id, ruta_storage from public.evidencias_servicio
+     where servicio_id = p_servicio and estado = 'archivada'
+  loop
+    perform 1 from storage.objects
+     where bucket_id = 'documentos' and name = r.ruta_storage
+       and coalesce((metadata ->> 'size')::bigint, 0) > 0;
+    if not found then
+      raise exception 'falta restaurar el archivo original: %', r.ruta_storage;
+    end if;
+  end loop;
+
+  update public.evidencias_servicio
+     set estado = 'activa',
+         ruta_archivo = null,
+         archivada_en = null,
+         informe_id = null
+   where servicio_id = p_servicio and estado = 'archivada';
+  get diagnostics v_ok = row_count;
+  return v_ok;
+end;
+$$;

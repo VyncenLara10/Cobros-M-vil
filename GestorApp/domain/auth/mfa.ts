@@ -71,8 +71,27 @@ export async function nivelDeAcceso(): Promise<{ actual: string; siguiente: stri
 }
 
 export async function faltaSegundoFactor(): Promise<boolean> {
-  const nivel = await nivelDeAcceso();
-  return !!nivel && nivel.siguiente === 'aal2' && nivel.actual !== nivel.siguiente;
+  try {
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (error || !data) {
+      // Sin respuesta fiable NO se asume "sin MFA" (antes un error dejaba
+      // pasar la sesión aal1 sin segundo factor). Se pregunta por los
+      // factores: si hay factor verificado, se exige el código; solo si
+      // AMBAS consultas fallan se asume lo más seguro para el acceso (true).
+      const { data: factores, error: errorFactores } = await supabase.auth.mfa.listFactors();
+      if (errorFactores || !factores) {
+        console.warn('[mfa] sin respuesta de AAL ni factores; se exige el segundo factor');
+        return true;
+      }
+      const verificado = (factores.totp ?? []).some((f) => f.status === 'verified');
+      if (verificado) console.warn('[mfa] AAL no disponible; exigiendo segundo factor por seguridad');
+      return verificado;
+    }
+    return data.nextLevel === 'aal2' && data.currentLevel !== data.nextLevel;
+  } catch (e) {
+    console.warn('[mfa] error verificando el nivel de acceso', e);
+    return true;
+  }
 }
 
 export async function completarDesafioMfaConCodigo(codigo: string): Promise<{ ok: boolean; error?: string }> {

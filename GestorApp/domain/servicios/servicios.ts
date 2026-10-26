@@ -620,28 +620,77 @@ export async function sumaPagosTotal(): Promise<number> {
   return (data ?? []).reduce((t, p) => t + Number(p.monto ?? 0), 0);
 }
 
-/** Convierte un servicio (ya aceptado) en gestión legal: queda visible para abogados. */
+/**
+ * Convierte un servicio en gestión legal y TRANSFIERE la asignación al pool:
+ *  - tipo = 'legal', gestor_id = null, estado = 'pendiente' → cualquier
+ *    abogado puede tomarlo con el flujo de aceptar ya existente;
+ *  - escalado_por = quién lo mandó → historial de solo lectura (RLS SELECT)
+ *    para el escalador, que ya no puede editarlo (RLS UPDATE lo excluye);
+ *  - inserta una notificación broadcast a los abogados (campana +, en la
+ *    fase 5b, push server-side vía trigger).
+ */
 export async function escalarALegal(servicioId: string): Promise<{ ok: boolean; error?: string }> {
   if (!supabaseConfigurado) return { ok: true };
+  const { data: auth } = await supabase.auth.getUser();
+  const escaladoPor = auth.user?.id;
+  if (!escaladoPor) return { ok: false, error: 'Sesión vencida: vuelve a entrar.' };
+
   const { data: actual, error: errLeer } = await supabase
     .from('servicios')
-    .select('notas, tipo_gestion_legal')
+    .select('notas, tipo_gestion_legal, cliente:clientes(nombre)')
     .eq('id', servicioId)
     .maybeSingle();
   if (errLeer) return { ok: false, error: errLeer.message };
   const notasPrevias = actual?.notas ?? '';
   const nota = `[Escalado a legal] ${new Date().toLocaleString('es-GT', { hour12: false })}`;
-  const { error } = await supabase
+  const { data: escalado, error } = await supabase
     .from('servicios')
     .update({
       tipo: 'legal',
+      gestor_id: null,
+      estado: 'pendiente',
+      fase: null,
+      escalado_por: escaladoPor,
       tipo_gestion_legal: actual?.tipo_gestion_legal ?? 'Escalado por gestor',
       notas: notasPrevias ? `${notasPrevias}\n${nota}` : nota,
     })
-    .eq('id', servicioId);
+    .eq('id', servicioId)
+    .select('id')
+    .maybeSingle();
   if (error) return { ok: false, error: error.message };
+  if (!escalado) return { ok: false, error: 'No se pudo escalar: no tienes permiso sobre este caso.' };
+
   registrarEvento(servicioId, 'escalado_legal');
+
+  // Broadcast a los abogados (RLS: "staff crea notificaciones" con check true).
+  const nombreCliente =
+    (actual?.cliente as { nombre?: string } | null)?.nombre?.trim() || 'un cliente';
+  const { error: errNotif } = await supabase.from('notificaciones').insert({
+    perfil_id: null,
+    rol_destino: 'abogado',
+    titulo: '⚖️ Caso escalado a legal',
+    cuerpo: `${nombreCliente}: un gestor escaló este caso a gestión legal. Ábrelo desde la pestaña Legal para tomarlo.`,
+    tipo: 'servicio_escalado',
+    referencia_id: servicioId,
+  });
+  if (errNotif) console.warn('[servicios] escalarALegal notificación', errNotif.message);
+
   return { ok: true };
+}
+
+/** Casos que este gestor escaló a legal: historial de solo lectura. */
+export async function serviciosEscaladosPor(gestorId: string): Promise<Servicio[]> {
+  if (!supabaseConfigurado) return [];
+  const { data, error } = await supabase
+    .from('servicios')
+    .select(SELECT_SERVICIO)
+    .eq('escalado_por', gestorId)
+    .order('fecha_asignacion', { ascending: false });
+  if (error) {
+    console.warn('[servicios] serviciosEscaladosPor', error.message);
+    return [];
+  }
+  return (data ?? []).map(mapServicio);
 }
 
 /** Atajo del detalle: marcar "no localizado" reutilizando completarServicio. */

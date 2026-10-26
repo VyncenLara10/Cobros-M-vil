@@ -24,7 +24,7 @@ import {
   StatsGestor,
 } from '@/domain/servicios/servicios';
 import { useBottomInset } from '@/hooks/useBottomInset';
-import { useServiciosDeGestor, useServiciosDisponibles, useServiciosEnTiempoReal } from '@/hooks/useServicios';
+import { useServiciosDeGestor, useServiciosDisponibles, useServiciosEnTiempoReal, useServiciosEscalados } from '@/hooks/useServicios';
 import {
   comisionMaxCredito,
   comisionMaxTotal,
@@ -41,6 +41,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Modal,
   Pressable,
@@ -64,6 +65,7 @@ export default function MiPerfilScreen() {
 
   const { servicios: pendientes, refrescar: refrescarPendientes } = useServiciosDisponibles(rol, usuario?.zona);
   const { servicios: activos, refrescar: refrescarActivos } = useServiciosDeGestor(usuario?.id);
+  const { servicios: escalados, refrescar: refrescarEscalados } = useServiciosEscalados(usuario?.id);
   // IMPORTANTE: refrescar DEBE ser estable (useCallback con dependencias
   // primitivas). Se pasa a useFocusEffect abajo; si se recreara en cada render
   // entraría en bucle infinito y Android cerraba la app al abrir esta pantalla.
@@ -71,13 +73,16 @@ export default function MiPerfilScreen() {
   const refrescar = useCallback(() => {
     refrescarPendientes();
     refrescarActivos();
+    refrescarEscalados();
     if (usuarioId) {
-      cargarStatsGestor(usuarioId).then((s) => {
-        setStats(s);
-        if (s) setDisponible(s.disponible);
-      });
+      cargarStatsGestor(usuarioId)
+        .then((s) => {
+          setStats(s);
+          if (s) setDisponible(s.disponible);
+        })
+        .catch((e) => console.warn('[mi-perfil] error cargando stats', e));
     }
-  }, [usuarioId, refrescarPendientes, refrescarActivos]);
+  }, [usuarioId, refrescarPendientes, refrescarActivos, refrescarEscalados]);
 
   // Realtime: servicio nuevo elegible → notificación local + refetch.
   useServiciosEnTiempoReal(usuario, refrescarPendientes);
@@ -105,7 +110,14 @@ export default function MiPerfilScreen() {
     router.replace('/login');
   };
 
-  if (!usuario) return null;
+  if (!usuario) {
+    // Sesión aún cargando: mostrar spinner (nunca pantalla en blanco).
+    return (
+      <View style={[styles.screen, styles.centrado]}>
+        <ActivityIndicator color={Colors.primary} />
+      </View>
+    );
+  }
 
   const alternarDisponible = () => {
     const nuevo = !disponible;
@@ -256,6 +268,68 @@ export default function MiPerfilScreen() {
               </View>
             );
           })}
+
+          <View style={{ height: Spacing.xl }} />
+        </>
+      )}
+
+      {/* ══ ESCALADOS A LEGAL (historial de solo lectura) ══ */}
+      {escalados.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Escalados a legal</Text>
+          <Text style={styles.sectionSub}>
+            Historial de solo lectura: el área legal toca estos casos, tú ya no puedes editarlos.
+          </Text>
+
+          {escalados.map((s) => (
+            <Pressable key={s.id} style={styles.escaladoCard} onPress={() => router.push(`/servicio/${s.id}`)}>
+              <View style={styles.solicitudTop}>
+                <BadgeTipo tipo="legal" />
+                <View style={styles.escaladoEstado}>
+                  <Ionicons
+                    name={
+                      s.estado === 'completado'
+                        ? 'checkmark-circle'
+                        : s.estado === 'pendiente'
+                          ? 'hourglass-outline'
+                          : 'briefcase-outline'
+                    }
+                    size={13}
+                    color={
+                      s.estado === 'completado'
+                        ? Colors.success
+                        : s.estado === 'pendiente'
+                          ? Colors.warning
+                          : '#9B7BF0'
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.escaladoEstadoText,
+                      {
+                        color:
+                          s.estado === 'completado'
+                            ? Colors.success
+                            : s.estado === 'pendiente'
+                              ? Colors.warning
+                              : '#9B7BF0',
+                      },
+                    ]}
+                  >
+                    {s.estado === 'completado'
+                      ? 'Completado'
+                      : s.estado === 'pendiente'
+                        ? 'Esperando abogado'
+                        : 'En gestión legal'}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={styles.solicitudNombre}>{s.cliente.nombre}</Text>
+              <Text style={styles.solicitudDir}>📍 {s.cliente.direccion} · {s.cliente.zona}</Text>
+              <Text style={styles.escaladoHint}>Ver caso (solo lectura) ›</Text>
+            </Pressable>
+          ))}
 
           <View style={{ height: Spacing.xl }} />
         </>
@@ -520,6 +594,7 @@ function CreditoRow({ c }: { c: CreditoCliente }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
+  centrado: { alignItems: 'center', justifyContent: 'center' },
   content: { padding: Spacing.lg, paddingBottom: Spacing.xxl },
   pageTitle: { ...Typography.title, color: Colors.textPrimary, marginBottom: Spacing.md },
 
@@ -556,6 +631,10 @@ const styles = StyleSheet.create({
 
   solicitudCard: { backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 0.5, borderColor: Colors.border, padding: Spacing.md, marginBottom: Spacing.sm },
   activoCard: { backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.info, padding: Spacing.md, marginBottom: Spacing.sm },
+  escaladoCard: { backgroundColor: Colors.surface, borderRadius: Radius.lg, borderWidth: 1, borderStyle: 'dashed', borderColor: '#9B7BF0', padding: Spacing.md, marginBottom: Spacing.sm },
+  escaladoEstado: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  escaladoEstadoText: { ...Typography.micro, fontWeight: '700' },
+  escaladoHint: { ...Typography.caption, color: Colors.info, fontWeight: '600' },
   solicitudTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
   subChip: { backgroundColor: Colors.successMuted, paddingHorizontal: Spacing.sm, paddingVertical: 2, borderRadius: Radius.pill },
   subChipText: { ...Typography.micro, color: '#065F46', fontWeight: '700', textTransform: 'none', letterSpacing: 0 },

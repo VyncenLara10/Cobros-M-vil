@@ -239,6 +239,16 @@ export default function LoginScreen() {
                 error={error}
               />
               <PrimaryButton label={cargando ? 'Verificando…' : 'Confirmar'} onPress={verificarMfa} loading={cargando} />
+              <Pressable
+                onPress={() => {
+                  setError(undefined);
+                  setCodigo('');
+                  setModo('password');
+                }}
+                style={styles.linkCentrado}
+              >
+                <Text style={styles.linkCentradoText}>Volver a entrar con contraseña</Text>
+              </Pressable>
             </>
           )}
         </View>

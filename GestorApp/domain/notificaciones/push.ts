@@ -4,14 +4,17 @@
  * aprobada, y (2) avisar de servicios nuevos disponibles para el rol del
  * gestor.
  *
- * HOY (sin backend): se disparan como notificación LOCAL en el mismo
- * dispositivo — sirve para probar el flujo real de principio a fin.
- * CUANDO EXISTA SUPABASE: en vez de notificarLocal(), una Edge Function
- * hace POST a la Expo Push API usando el token guardado en la tabla
- * `push_tokens` (ver supabase/schema.sql) del USUARIO QUE DEBE recibirla
- * (no necesariamente el que dispara la acción).
+ * REMOTO (server-side, supabase/fix-push-server.sql): el servidor inserta en
+ * `public.notificaciones`; un trigger + pg_net envía el push a Expo Push API
+ * usando los tokens de `public.push_tokens`, con outbox por destinatario,
+ * reintentos y tickets/recibos auditados. El cliente SOLO registra su token
+ * aquí; nunca envía notificaciones de negocio.
+ *
+ * LOCAL: notificarLocal() sigue disponible para feedback inmediato en el
+ * mismo dispositivo (ej. "servicio aceptado").
  */
 
+import { supabase, supabaseConfigurado } from '@/lib/supabase';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
@@ -35,9 +38,9 @@ if (puedeUsarNotificaciones) {
 }
 
 /**
- * Pide permiso y obtiene el Expo Push Token del dispositivo. Se llama al
- * iniciar sesión. Por ahora solo queda listo en memoria (log) — cuando haya
- * backend, se guarda en `push_tokens` asociado al usuario.
+ * Pide permiso, obtiene el Expo Push Token del dispositivo y lo guarda en
+ * `push_tokens` (una fila por perfil/dispositivo). Se llama al iniciar
+ * sesión; de aquí sale el disparo de los pushes de negocio (trigger SQL).
  */
 export async function registrarPushToken(): Promise<string | null> {
   if (Platform.OS === 'web' || !Device.isDevice) return null;
@@ -57,9 +60,13 @@ export async function registrarPushToken(): Promise<string | null> {
     if (estado !== 'granted') return null;
 
     if (Platform.OS === 'android') {
+      // Alta prioridad: los pushes de negocio deben llegar en primer plano
+      // aunque la app esté en segundo plano.
       await Notifications.setNotificationChannelAsync('default', {
         name: 'GestorApp',
-        importance: Notifications.AndroidImportance.DEFAULT,
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#1A1A2E',
       });
     }
 
@@ -67,7 +74,27 @@ export async function registrarPushToken(): Promise<string | null> {
     const { data: token } = await Notifications.getExpoPushTokenAsync(
       projectId ? { projectId } : undefined,
     );
-    // TODO: await supabase.from('push_tokens').upsert({ perfil_id, expo_push_token: token, plataforma: Platform.OS })
+
+    if (supabaseConfigurado && token) {
+      const { data: auth } = await supabase.auth.getUser();
+      const uid = auth.user?.id;
+      if (uid) {
+        const { error } = await supabase
+          .from('push_tokens')
+          .upsert(
+            { perfil_id: uid, expo_push_token: token, plataforma: Platform.OS },
+            { onConflict: 'expo_push_token' },
+          );
+        if (error) console.warn('[push] no se pudo guardar el token', error.message);
+        // Limpia tokens viejos de este perfil (reinstalaciones/cambios de device).
+        const { error: errPodar } = await supabase
+          .from('push_tokens')
+          .delete()
+          .eq('perfil_id', uid)
+          .neq('expo_push_token', token);
+        if (errPodar) console.warn('[push] no se pudieron podar tokens', errPodar.message);
+      }
+    }
     return token;
   } catch {
     return null; // sin red, sin credenciales push configuradas, o permiso denegado: no bloquea el login

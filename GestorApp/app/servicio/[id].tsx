@@ -5,6 +5,11 @@ import { useSesion } from '@/domain/auth/sesion';
 import { cargarEventos, EventoServicio } from '@/domain/servicios/eventos';
 import { cargarEvidencias, EvidenciaServicio } from '@/domain/servicios/evidencias';
 import {
+  contarEvidenciasArchivadas,
+  generarInformeYArchivar,
+  restaurarEvidencias,
+} from '@/domain/servicios/informes';
+import {
   escalarALegal,
   marcarNoLocalizado,
   registrarIntento,
@@ -14,8 +19,8 @@ import { useBottomInset } from '@/hooks/useBottomInset';
 import { useServicio } from '@/hooks/useServicios';
 import { ESTADO_LABEL } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -193,8 +198,24 @@ export default function DetalleServicioScreen() {
   const [eventos, setEventos] = useState<EventoServicio[]>([]);
   const [evidencias, setEvidencias] = useState<EvidenciaServicio[]>([]);
   const [evidenciaAbierta, setEvidenciaAbierta] = useState<string | null>(null);
+  const [evidenciasArchivadas, setEvidenciasArchivadas] = useState(0);
+  const [generandoInforme, setGenerandoInforme] = useState(false);
 
   const { servicio, cargando, refrescar } = useServicio(id as string | undefined);
+
+  // Al volver de un formulario de completado (router.back), refrescar para
+  // pintar el bloque "Caso completado"; el primer foco lo omite (el hook ya
+  // cargó) para no duplicar la petición inicial.
+  const primerFoco = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (primerFoco.current) {
+        primerFoco.current = false;
+        return;
+      }
+      refrescar();
+    }, [refrescar]),
+  );
 
   // Actividad (hora + GPS por acción) y evidencias del servicio. Se recargan
   // cada vez que el servicio se refresca.
@@ -206,6 +227,9 @@ export default function DetalleServicioScreen() {
     });
     cargarEvidencias(servicio.id).then((ev) => {
       if (!cancelado) setEvidencias(ev);
+    });
+    contarEvidenciasArchivadas(servicio.id).then((n) => {
+      if (!cancelado) setEvidenciasArchivadas(n);
     });
     return () => {
       cancelado = true;
@@ -302,7 +326,67 @@ export default function DetalleServicioScreen() {
     );
   };
 
+  // ── Informe PDF (solo admin, servicios de verificación) ────────────────
+  const handleGenerarInforme = () => {
+    if (generandoInforme) return;
+    Alert.alert(
+      'Generar informe PDF',
+      'Se creará el PDF con las evidencias de este caso y las fotos quedarán archivadas en el expediente.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Generar',
+          onPress: async () => {
+            setGenerandoInforme(true);
+            const res = await generarInformeYArchivar(servicio);
+            setGenerandoInforme(false);
+            refrescar();
+            if (res.ok) {
+              Alert.alert('Informe listo', 'El PDF está listo para compartir y las evidencias quedaron archivadas.');
+            } else {
+              Alert.alert('No se pudo generar el informe', res.error ?? 'Error desconocido');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleRestaurarEvidencias = () => {
+    Alert.alert(
+      'Restaurar evidencias',
+      'Las fotos archivadas volverán a la carpeta activa de evidencias de este servicio.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Restaurar',
+          onPress: async () => {
+            const res = await restaurarEvidencias(servicio.id);
+            refrescar();
+            Alert.alert(
+              res.ok ? 'Evidencias restauradas' : 'No se pudo restaurar',
+              res.ok ? 'Las fotos vuelven a estar activas.' : (res.error ?? 'Error desconocido'),
+            );
+          },
+        },
+      ],
+    );
+  };
+
   const estaActivo = servicio.estado === 'activo' || servicio.estado === 'pendiente';
+
+  // Casos legales: solo admin o el abogado asignado (o sin asignar) pueden
+  // actuar. El gestor que escaló queda en SOLO LECTURA (RLS también lo bloquea).
+  const puedeAccionar =
+    servicio.tipo !== 'legal'
+      ? true
+      : usuario?.rol === 'admin' ||
+        (usuario?.rol === 'abogado' &&
+          (servicio.gestorId === usuario?.id || servicio.gestorId == null));
+
+  // El informe PDF con archivado de evidencias es exclusivo del admin y de
+  // los servicios de verificación (los legales tienen su propio flujo).
+  const puedeInformar = usuario?.rol === 'admin' && servicio.tipo === 'verificacion';
 
   return (
     <>
@@ -424,6 +508,29 @@ export default function DetalleServicioScreen() {
           </View>
         )}
 
+        {/* ── Informe PDF + archivado de evidencias (solo admin, verificación) ── */}
+        {puedeInformar && (
+          <View style={styles.actionsSection}>
+            <Text style={styles.cardTitle}>INFORME DEL CASO</Text>
+            <ActionBtn
+              icon="document-text-outline"
+              label={generandoInforme ? 'Generando informe…' : 'Descargar informe PDF'}
+              color={COLORS.info}
+              bg={`${COLORS.info}15`}
+              onPress={handleGenerarInforme}
+            />
+            {evidenciasArchivadas > 0 && (
+              <ActionBtn
+                icon="arrow-undo-outline"
+                label={`Restaurar evidencias (${evidenciasArchivadas})`}
+                color={COLORS.warning}
+                bg={`${COLORS.warning}15`}
+                onPress={handleRestaurarEvidencias}
+              />
+            )}
+          </View>
+        )}
+
         {/* ── Actividad: hora + ubicación de cada acción ── */}
         {eventos.length > 0 && (
           <View style={styles.card}>
@@ -449,8 +556,8 @@ export default function DetalleServicioScreen() {
           </View>
         )}
 
-        {/* ── Acciones (solo si está activo/pendiente) ── */}
-        {estaActivo && (
+        {/* ── Acciones (solo si está activo/pendiente y el rol puede tocarlo) ── */}
+        {estaActivo && puedeAccionar && (
           <View style={styles.actionsSection}>
             <Text style={styles.cardTitle}>ACCIONES</Text>
 
@@ -463,7 +570,10 @@ export default function DetalleServicioScreen() {
                 onPress={() => setModalPago(true)}
               />
             )}
-            {(servicio.tipo === 'verificacion' || servicio.tipo === 'legal') && (
+            {(servicio.tipo === 'verificacion' ||
+              servicio.tipo === 'legal' ||
+              servicio.tipo === 'notificacion' ||
+              servicio.tipo === 'cobro') && (
               <ActionBtn
                 icon="checkmark-circle-outline"
                 label="Marcar como completado"
@@ -473,7 +583,11 @@ export default function DetalleServicioScreen() {
                   router.push(
                     servicio.tipo === 'verificacion'
                       ? { pathname: '/verificacion/[id]', params: { id: servicio.id } }
-                      : { pathname: '/legal/[id]', params: { id: servicio.id } },
+                      : servicio.tipo === 'legal'
+                        ? { pathname: '/legal/[id]', params: { id: servicio.id } }
+                        : servicio.tipo === 'notificacion'
+                          ? { pathname: '/notificacion/[id]', params: { id: servicio.id } }
+                          : { pathname: '/cobro/[id]', params: { id: servicio.id } },
                   )
                 }
               />
@@ -504,6 +618,16 @@ export default function DetalleServicioScreen() {
               bg={`${COLORS.danger}12`}
               onPress={handleNoLocalizado}
             />
+          </View>
+        )}
+
+        {/* Caso legal donde solo lectura (escalador u otro rol sin permiso) */}
+        {estaActivo && !puedeAccionar && (
+          <View style={styles.soloLecturaBox}>
+            <Ionicons name="lock-closed-outline" size={16} color={COLORS.textSecondary} />
+            <Text style={styles.soloLecturaText}>
+              Caso en gestión legal: aquí solo lectura. El área legal se encarga de los pasos siguientes.
+            </Text>
           </View>
         )}
 
@@ -634,6 +758,20 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   estadoFinalText: { fontSize: 15, fontWeight: '700' },
+
+  // Caso legal de solo lectura (escalador u otro rol sin permiso)
+  soloLecturaBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+    backgroundColor: COLORS.surfaceAlt,
+    borderRadius: RADIUS.lg,
+    borderWidth: 0.5,
+    borderColor: COLORS.border,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  soloLecturaText: { flex: 1, fontSize: 13, color: COLORS.textSecondary, lineHeight: 18 },
 
   // Evidencias
   evidenciasGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },

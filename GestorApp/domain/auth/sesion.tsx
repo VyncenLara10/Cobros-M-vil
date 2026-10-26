@@ -1,7 +1,9 @@
 import { supabase, supabaseConfigurado } from '@/lib/supabase';
 import { RolGestor } from '@/types';
+import { usePathname } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, AppState, Platform, View } from 'react-native';
 import { completarDesafioMfaConCodigo, faltaSegundoFactor } from './mfa';
 
 export type RolApp = RolGestor | 'admin';
@@ -137,6 +139,10 @@ async function cargarPerfilDesdeDB(userId: string): Promise<{ usuario: Usuario; 
 
 const CLAVE_SECURE_STORE = 'gestorapp_sesion';
 
+/** Sesión activa sin actividad durante este tiempo → cierre automático. */
+const INACTIVIDAD_MS = 30 * 60 * 1000; // 30 minutos
+const CHEQUEO_INACTIVIDAD_MS = 30 * 1000;
+
 async function guardarSesion(u: Usuario): Promise<void> {
   try {
     await SecureStore.setItemAsync(CLAVE_SECURE_STORE, JSON.stringify(u));
@@ -192,6 +198,54 @@ const Ctx = createContext<SesionCtx | null>(null);
 export function SesionProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [cargando, setCargando] = useState(supabaseConfigurado);
+
+  // ── Inactividad: último gesto del usuario (ruta, app activa, touch, tecla) ──
+  const ultimoActividad = useRef(Date.now());
+  const registrarActividad = useCallback(() => {
+    ultimoActividad.current = Date.now();
+  }, []);
+
+  // Navegar cuenta como actividad (evita expirar leyendo una pantalla).
+  const pathname = usePathname();
+  useEffect(() => {
+    if (usuario) registrarActividad();
+  }, [pathname, usuario, registrarActividad]);
+
+  // Reloj de inactividad: 30 min → cerrar sesión con aviso.
+  useEffect(() => {
+    if (!usuario) return;
+    registrarActividad();
+    const estadoApp = AppState.addEventListener('change', (estado) => {
+      if (estado === 'active') registrarActividad();
+    });
+    let quitarOyentesWeb: (() => void) | undefined;
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const oye = () => registrarActividad();
+      document.addEventListener('pointerdown', oye, true);
+      document.addEventListener('keydown', oye, true);
+      quitarOyentesWeb = () => {
+        document.removeEventListener('pointerdown', oye, true);
+        document.removeEventListener('keydown', oye, true);
+      };
+    }
+    const reloj = setInterval(() => {
+      if (Date.now() - ultimoActividad.current < INACTIVIDAD_MS) return;
+      registrarActividad(); // evita repetir el aviso en cada chequeo
+      setUsuario(null);
+      void borrarSesionGuardada();
+      if (supabaseConfigurado) void supabase.auth.signOut();
+      Alert.alert(
+        'Sesión cerrada',
+        'Pasaste 30 minutos sin actividad, así que cerramos tu sesión por seguridad.',
+      );
+    }, CHEQUEO_INACTIVIDAD_MS);
+    return () => {
+      estadoApp.remove();
+      quitarOyentesWeb?.();
+      clearInterval(reloj);
+    };
+  }, [usuario, registrarActividad]);
+
 useEffect(() => {
     if (!supabaseConfigurado) {
       setCargando(false);
@@ -343,7 +397,21 @@ useEffect(() => {
     [usuario, cargando],
   );
 
-  return <Ctx.Provider value={valor}>{children}</Ctx.Provider>;
+  // El View raíz solo OBSERVA los toques (devuelve false: no se los roba)
+  // para resetear el reloj de inactividad en Android/iOS.
+  return (
+    <Ctx.Provider value={valor}>
+      <View
+        style={{ flex: 1 }}
+        onStartShouldSetResponderCapture={() => {
+          registrarActividad();
+          return false;
+        }}
+      >
+        {children}
+      </View>
+    </Ctx.Provider>
+  );
 }
 
 export function useSesion(): SesionCtx {

@@ -55,7 +55,15 @@
         {
           "locationAlwaysAndWhenInUsePermission": "GestorApp usa tu ubicación para que el administrador pueda ver dónde estás mientras trabajas en un servicio."
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "GestorApp necesita acceso a tus fotos para adjuntar evidencias y documentos de registro.",
+          "cameraPermission": "GestorApp usa la cámara para tomar fotos de evidencias (domicilio, documentos y firmas)."
+        }
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

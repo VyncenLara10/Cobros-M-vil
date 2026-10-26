@@ -2,7 +2,7 @@ import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 export type EstadoDocumento = 'vacio' | 'cargado';
 
@@ -14,10 +14,10 @@ interface DocumentUploaderProps {
 }
 
 /**
- * Selector de documento/foto. Solo guarda la imagen en memoria local
- * del dispositivo (useState), no hay subida real a ningun servidor.
- * Cuando se conecte el backend, el onChange(uri) es el punto donde
- * se dispara el upload real (multipart o presigned URL de S3).
+ * Selector de documento/foto con DOS fuentes: cámara o galería (en web,
+ * solo galería: la cámara del navegador no está soportada). Solo guarda la
+ * imagen en memoria local (useState); onChange(uri) es el punto donde el
+ * llamador dispara la subida real.
  */
 export default function DocumentUploader({
   titulo,
@@ -28,28 +28,63 @@ export default function DocumentUploader({
   const [uri, setUri] = useState<string | null>(null);
   const [estado, setEstado] = useState<EstadoDocumento>('vacio');
 
-  const seleccionarImagen = async () => {
-    const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permiso.granted) {
-      Alert.alert(
-        'Permiso necesario',
-        'Se necesita acceso a tus fotos para adjuntar el documento.',
-      );
-      return;
-    }
-
-    const resultado = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
-      allowsEditing: true,
-    });
-
+  const aplicarResultado = (resultado: ImagePicker.ImagePickerResult) => {
     if (!resultado.canceled && resultado.assets?.length) {
       const nuevaUri = resultado.assets[0].uri;
       setUri(nuevaUri);
       setEstado('cargado');
       onChange?.(nuevaUri);
     }
+  };
+
+  const tomarFoto = async () => {
+    try {
+      const permiso = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permiso.granted) {
+        Alert.alert('Permiso necesario', 'Se necesita acceso a la cámara para tomar la foto.');
+        return;
+      }
+      const resultado = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        quality: 0.7,
+        allowsEditing: true,
+      });
+      aplicarResultado(resultado);
+    } catch (e) {
+      console.warn('[documentuploader] error abriendo la cámara', e);
+      Alert.alert('No se pudo abrir la cámara', 'Intenta de nuevo o elige una foto de tu galería.');
+    }
+  };
+
+  const elegirDeGaleria = async () => {
+    try {
+      const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permiso.granted) {
+        Alert.alert('Permiso necesario', 'Se necesita acceso a tus fotos para adjuntar el documento.');
+        return;
+      }
+      const resultado = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.7,
+        allowsEditing: true,
+      });
+      aplicarResultado(resultado);
+    } catch (e) {
+      console.warn('[documentuploader] error abriendo la galería', e);
+      Alert.alert('No se pudo abrir la galería', 'Intenta de nuevo.');
+    }
+  };
+
+  const seleccionarImagen = () => {
+    if (Platform.OS === 'web') {
+      elegirDeGaleria();
+      return;
+    }
+    Alert.alert('Adjuntar foto', '¿De dónde la sacas?', [
+      { text: 'Tomar foto', onPress: tomarFoto },
+      { text: 'Elegir de galería', onPress: elegirDeGaleria },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
   };
 
   const quitarImagen = () => {

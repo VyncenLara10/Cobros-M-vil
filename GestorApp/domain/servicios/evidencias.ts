@@ -23,6 +23,8 @@ export interface EvidenciaServicio {
   titulo: string;
   fecha: string;
   url: string;
+  /** Ruta original en el bucket (para copiar al archivar, fase 6). */
+  ruta: string;
 }
 
 /** Lee los bytes de una imagen (file:// en móvil, blob:/data:/http en web). */
@@ -82,13 +84,15 @@ export async function subirEvidencias(
   return resultado;
 }
 
-/** Historial de evidencias con URL firmada (vence en 24 h) para mostrarlas. */
+/** Historial de evidencias con URL firmada (vence en 24 h) para mostrarlas.
+ *  Solo las 'activas': las archivadas (fase 6) viven en archivo_evidencias. */
 export async function cargarEvidencias(servicioId: string): Promise<EvidenciaServicio[]> {
   if (!supabaseConfigurado) return [];
   const { data, error } = await supabase
     .from('evidencias_servicio')
     .select('id, clave, ruta_storage, creado_en')
     .eq('servicio_id', servicioId)
+    .eq('estado', 'activa')
     .order('creado_en', { ascending: true })
     .limit(30);
   if (error) {
@@ -113,6 +117,7 @@ export async function cargarEvidencias(servicioId: string): Promise<EvidenciaSer
           hour12: false,
         }),
         url: signed?.signedUrl ?? '',
+        ruta: fila.ruta_storage,
       };
     }),
   );
