@@ -66,9 +66,14 @@ export default function FormularioLegalScreen() {
 
   const confirmarLlegada = async () => {
     setConfirmando(true);
-    await marcarEnSitio(servicio.id);
-    setConfirmando(false);
-    setEnSitioForzado(true);
+    try {
+      await marcarEnSitio(servicio.id);
+      setEnSitioForzado(true);
+    } catch (error) {
+      Alert.alert('No se pudo confirmar la llegada', error instanceof Error ? error.message : 'Reintenta.');
+    } finally {
+      setConfirmando(false);
+    }
   };
 
   const enviar = async () => {
@@ -77,25 +82,31 @@ export default function FormularioLegalScreen() {
       return;
     }
     setEnviando(true);
+    try {
     const notaFinal = [
       recibioNombre ? `Recibió: ${recibioNombre}` : '',
       notas,
     ].filter(Boolean).join('. ');
+    let avisoFotos = '';
+    if (evidencia) {
+      const evid = await subirEvidencias(servicio.id, { evidencia });
+      if (evid.fallidas > 0) throw new Error('No se pudo guardar la evidencia. Reintenta antes de finalizar.');
+    }
     await completarServicio(servicio, resultado === 'no_localizado' ? 'no_localizado' : 'completado', {
       notaGestor: notaFinal,
       clienteActualizado: cli.cambios,
     });
-    let avisoFotos = '';
-    if (evidencia) {
-      const evid = await subirEvidencias(servicio.id, { evidencia });
-      if (evid.fallidas > 0) avisoFotos = '\n⚠️ No se pudo subir la evidencia; verifica tu conexión.';
-    }
     setEnviando(false);
     Alert.alert(
       '✅ Diligencia registrada',
       `Resultado: ${RESULTADOS.find((r) => r.id === resultado)?.label}.${avisoFotos}`,
       [{ text: 'OK', onPress: () => router.back() }],
     );
+    } catch (error) {
+      Alert.alert('No se pudo guardar', error instanceof Error ? error.message : 'Verifica la conexión e inténtalo otra vez.');
+    } finally {
+      setEnviando(false);
+    }
   };
 
   if (!enSitio) {
