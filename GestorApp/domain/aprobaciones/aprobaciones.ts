@@ -54,6 +54,7 @@ function filaASolicitud(fila: any, firmas: Map<string, string>): SolicitudRegist
     placaVehiculo: fila.placa_vehiculo ?? undefined,
     zonaCobertura: (fila.zona_cobertura as ZonaCobertura) ?? null,
     banco: fila.banco ?? '',
+    tipoCuenta: fila.tipo_cuenta ?? '',
     numeroCuenta: fila.numero_cuenta ?? '',
     nombreTitular: fila.nombre_titular ?? '',
     documentos,
