@@ -195,6 +195,37 @@ create trigger avisar_escalado_legal after update on public.servicios
 for each row execute function public.avisar_escalado_legal();
 
 -- Una cuenta desactivada no debe seguir accediendo a información interna.
+-- Condiciones adicionales incluso si otra migración antigua dejó policies
+-- permisivas. RLS restrictivo siempre exige un perfil activo.
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'clientes','referencias_cliente','creditos_cliente',
+    'pagos','eventos_servicio','evidencias_servicio','ubicaciones_gestor'
+  ] loop
+    execute format('alter table public.%I enable row level security',t);
+    execute format('drop policy if exists "solo usuarios activos" on public.%I',t);
+    execute format(
+      'create policy "solo usuarios activos" on public.%I as restrictive for all to authenticated using (public.rol_de(auth.uid()) is not null) with check (public.rol_de(auth.uid()) is not null)',
+      t
+    );
+  end loop;
+end;
+$$;
+
+-- Rechazar importes no positivos en cualquier inserción nueva, sin eliminar
+-- ni invalidar los históricos; revisar registros antiguos por separado.
+do $$
+begin
+  if not exists (select 1 from pg_constraint
+    where conname='pagos_monto_positivo' and conrelid='public.pagos'::regclass) then
+    alter table public.pagos add constraint pagos_monto_positivo
+      check (monto > 0) not valid;
+  end if;
+end;
+$$;
+
 -- Solicitudes: el candidato solo ve su propio estado; no puede autoaprobarse.
 alter table public.solicitudes_registro enable row level security;
 drop policy if exists "crear mi solicitud" on public.solicitudes_registro;
@@ -310,6 +341,7 @@ create table if not exists public.notificaciones_vistas (
   primary key (perfil_id, notificacion_id)
 );
 alter table public.notificaciones_vistas enable row level security;
+grant select, insert on public.notificaciones_vistas to authenticated;
 drop policy if exists "leer mis marcas" on public.notificaciones_vistas;
 create policy "leer mis marcas" on public.notificaciones_vistas
   for select to authenticated using (perfil_id = auth.uid());
