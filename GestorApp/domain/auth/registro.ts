@@ -97,6 +97,7 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
     placa_vehiculo: datos.placaVehiculo || null,
     zona_cobertura: datos.zonaCobertura,
     banco: datos.banco,
+    tipo_cuenta: datos.tipoCuenta,
     numero_cuenta: datos.numeroCuenta,
     nombre_titular: datos.nombreTitular,
     ...documentos,
