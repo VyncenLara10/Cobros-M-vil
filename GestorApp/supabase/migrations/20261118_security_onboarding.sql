@@ -102,7 +102,7 @@ create policy "staff lee creditos" on public.creditos_cliente
 -- Un trabajador no puede cambiar valores financieros, cliente o asignación ajena.
 create or replace function public.validar_cambio_servicio()
 returns trigger language plpgsql security definer set search_path = ''
-as $
+as $$
 declare u uuid := auth.uid();
 begin
   if public.es_admin() then return new; end if;
@@ -161,7 +161,7 @@ create policy "estadisticas propias" on public.gestores_stats for select
 -- sin poder escribir calificación ni comisiones.
 create or replace function public.cambiar_mi_disponibilidad(p_disponible boolean)
 returns void language plpgsql security definer set search_path = ''
-as $
+as $$
 begin
   if auth.uid() is null or public.rol_de(auth.uid()) not in
     ('verificador'::public.rol_app,'cobrador'::public.rol_app,'abogado'::public.rol_app)
