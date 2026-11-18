@@ -250,7 +250,7 @@ begin
       'doc_foto_vehiculo','doc_carne_colegiado') then
       raise exception 'Campo de documento no permitido';
     end if;
-    if v !~ ('^'||auth.uid()::text||'/[a-zA-Z0-9_/-]+[.](jpg|jpeg|png|pdf)
+    if v !~ ('^'||auth.uid()::text||'/[a-zA-Z0-9_/-]+[.](jpg|jpeg|png|pdf)$')
        or length(v)>240 then
       raise exception 'Ruta de documento inválida';
     end if;
