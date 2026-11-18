@@ -83,9 +83,14 @@ export default function FormularioCobroScreen() {
 
   const confirmarLlegada = async () => {
     setConfirmando(true);
-    await marcarEnSitio(servicio.id);
-    setConfirmando(false);
-    setEnSitioForzado(true);
+    try {
+      await marcarEnSitio(servicio.id);
+      setEnSitioForzado(true);
+    } catch (error) {
+      Alert.alert('No se pudo confirmar la llegada', error instanceof Error ? error.message : 'Reintenta.');
+    } finally {
+      setConfirmando(false);
+    }
   };
 
   const enviar = async () => {
@@ -94,6 +99,7 @@ export default function FormularioCobroScreen() {
       return;
     }
     setEnviando(true);
+    try {
     // 1) Guarda los pagos por banco (solo montos > 0) si hubo recuperación.
     const pagos = creditos
       .map((c) => {
@@ -102,7 +108,8 @@ export default function FormularioCobroScreen() {
       })
       .filter((p) => p.monto > 0);
     if (pagos.length > 0 && usuario) {
-      await registrarPagos(servicio.id, usuario.id, pagos);
+      const registro = await registrarPagos(servicio.id, usuario.id, pagos);
+      if (!registro.ok) throw new Error('No se guardaron los pagos: ' + registro.error);
     }
     // 2) Completa el servicio con el resultado final.
     await completarServicio(servicio, resultado === 'no_localizado' ? 'no_localizado' : 'completado', {
@@ -115,6 +122,11 @@ export default function FormularioCobroScreen() {
       `Recuperado: Q ${totales.recTotal.toLocaleString('es-GT', { minimumFractionDigits: 2 })}\nTu comisión: Q ${totales.comTotal.toLocaleString('es-GT', { minimumFractionDigits: 2 })}`,
       [{ text: 'OK', onPress: () => router.back() }],
     );
+    } catch (error) {
+      Alert.alert('No se pudo guardar', error instanceof Error ? error.message : 'Verifica la conexión e inténtalo otra vez.');
+    } finally {
+      setEnviando(false);
+    }
   };
 
   // ══════════════ CANDADO DE UBICACIÓN ══════════════
