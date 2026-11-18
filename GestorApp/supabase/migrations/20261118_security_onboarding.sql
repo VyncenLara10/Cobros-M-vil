@@ -156,6 +156,26 @@ drop policy if exists "estadisticas propias" on public.gestores_stats;
 create policy "estadisticas propias" on public.gestores_stats for select
   to authenticated using (perfil_id=auth.uid() or public.es_admin());
 
+
+-- Disponibilidad: un gestor puede cambiar exclusivamente su propia bandera,
+-- sin poder escribir calificación ni comisiones.
+create or replace function public.cambiar_mi_disponibilidad(p_disponible boolean)
+returns void language plpgsql security definer set search_path = ''
+as $
+begin
+  if auth.uid() is null or public.rol_de(auth.uid()) not in
+    ('verificador'::public.rol_app,'cobrador'::public.rol_app,'abogado'::public.rol_app)
+  then raise exception 'No autorizado'; end if;
+  update public.gestores_stats set disponible=p_disponible where perfil_id=auth.uid();
+  if not found then
+    insert into public.gestores_stats(perfil_id,disponible)
+    values(auth.uid(),p_disponible);
+  end if;
+end;
+$;
+revoke all on function public.cambiar_mi_disponibilidad(boolean) from public, anon;
+grant execute on function public.cambiar_mi_disponibilidad(boolean) to authenticated;
+
 -- Solicitudes: el candidato solo ve su propio estado; no puede autoaprobarse.
 alter table public.solicitudes_registro enable row level security;
 drop policy if exists "crear mi solicitud" on public.solicitudes_registro;
@@ -230,7 +250,49 @@ begin
       'doc_foto_vehiculo','doc_carne_colegiado') then
       raise exception 'Campo de documento no permitido';
     end if;
-    if v !~ ('^'||auth.uid()::text||'/[a-zA-Z0-9_/-]+\\.(jpg|jpeg|png|pdf)$')
+    if v !~ ('^'||auth.uid()::text||'/[a-zA-Z0-9_/-]+[.](jpg|jpeg|png|pdf)
+       or length(v)>240 then
+      raise exception 'Ruta de documento inválida';
+    end if;
+    if not exists(select 1 from storage.objects
+      where bucket_id='documentos' and name=v) then
+      raise exception 'Documento no encontrado en Storage';
+    end if;
+  end loop;
+  update public.solicitudes_registro set
+    doc_foto_perfil=coalesce(p_documentos->>'doc_foto_perfil',doc_foto_perfil),
+    doc_dpi_frente=coalesce(p_documentos->>'doc_dpi_frente',doc_dpi_frente),
+    doc_dpi_reverso=coalesce(p_documentos->>'doc_dpi_reverso',doc_dpi_reverso),
+    doc_antecedentes_penales=coalesce(p_documentos->>'doc_antecedentes_penales',doc_antecedentes_penales),
+    doc_licencia=coalesce(p_documentos->>'doc_licencia',doc_licencia),
+    doc_tarjeta_circulacion=coalesce(p_documentos->>'doc_tarjeta_circulacion',doc_tarjeta_circulacion),
+    doc_foto_vehiculo=coalesce(p_documentos->>'doc_foto_vehiculo',doc_foto_vehiculo),
+    doc_carne_colegiado=coalesce(p_documentos->>'doc_carne_colegiado',doc_carne_colegiado),
+    estado='pendiente', motivo_rechazo=null, revisado_en=null, revisado_por=null
+  where id=p_solicitud;
+end;
+$$;
+revoke all on function public.reenviar_papeleria(uuid,jsonb) from public, anon;
+grant execute on function public.reenviar_papeleria(uuid,jsonb) to authenticated;
+
+-- Permitir reemplazar archivos propios (upsert), sin tocar archivos ajenos.
+drop policy if exists "actualizar mis documentos" on storage.objects;
+create policy "actualizar mis documentos" on storage.objects
+  for update to authenticated
+  using (bucket_id='documentos' and (storage.foldername(name))[1]=auth.uid()::text)
+  with check (bucket_id='documentos' and (storage.foldername(name))[1]=auth.uid()::text);
+
+-- El cliente ya no puede inyectar notificaciones arbitrarias para otros usuarios.
+drop policy if exists "staff crea notificaciones" on public.notificaciones;
+create policy "admin crea notificaciones" on public.notificaciones
+  for insert to authenticated with check (public.es_admin());
+-- No permitir que un empleado marque como leída la broadcast compartida.
+drop policy if exists "actualizar mis notificaciones" on public.notificaciones;
+create policy "actualizar mis notificaciones" on public.notificaciones
+  for update to authenticated using (perfil_id=auth.uid())
+  with check (perfil_id=auth.uid());
+commit;
+)
        or length(v)>240 then
       raise exception 'Ruta de documento inválida';
     end if;
