@@ -507,9 +507,10 @@ export async function cargarStatsGestor(perfilId: string): Promise<StatsGestor |
 /** Activa/desactiva la disponibilidad del gestor (aparece en el tab Gestores del admin). */
 export async function actualizarDisponibilidad(perfilId: string, disponible: boolean): Promise<void> {
   if (!supabaseConfigurado) return;
-  const { error } = await supabase
-    .from('gestores_stats')
-    .upsert({ perfil_id: perfilId, disponible }, { onConflict: 'perfil_id' });
+  // El servidor usa auth.uid(): no acepta que un gestor cambie a otro.
+  const { error } = await supabase.rpc('cambiar_mi_disponibilidad', {
+    p_disponible: disponible,
+  });
   if (error) console.warn('[servicios] actualizarDisponibilidad', error.message);
 }
 
