@@ -96,39 +96,18 @@ export async function aprobarSolicitudReal(
   s: SolicitudRegistro,
   adminId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { error: errorSolicitud } = await supabase
-    .from('solicitudes_registro')
-    .update({ estado: 'aprobado', revisado_por: adminId, revisado_en: new Date().toISOString() })
-    .eq('id', s.id);
-  if (errorSolicitud) return { ok: false, error: errorSolicitud.message };
-
-  if (s.perfilId) {
-    // activo=true desbloquea el login; zona/teléfono/colegiado copian los
-    // datos del registro al perfil para que "Mi perfil" los muestre.
-    const { error: errorPerfil } = await supabase
-      .from('perfiles')
-      .update({
-        activo: true,
-        zona: zonaATexto(s.zonaCobertura),
-        telefono: s.telefono || null,
-        numero_colegiado: s.numeroColegiado || null,
-      })
-      .eq('id', s.perfilId);
-    if (errorPerfil) console.warn('[aprobaciones] no se pudo activar el perfil:', errorPerfil.message);
-
-    const { error: errorStats } = await supabase
-      .from('gestores_stats')
-      .upsert({ perfil_id: s.perfilId }, { onConflict: 'perfil_id' });
-    if (errorStats) console.warn('[aprobaciones] no se pudieron crear las estadísticas:', errorStats.message);
-
-    await notificarGestor(
-      s.perfilId,
-      '✅ Solicitud aprobada',
-      'Tu cuenta ya está activa. Inicia sesión para empezar a recibir servicios.',
-      'solicitud_aprobada',
-      s.id,
-    );
-  }
+  // Una única RPC autoriza, activa el perfil y crea estadísticas en transacción.
+  // La API no confía en adminId, ni acepta asignar el rol 'admin' desde la app.
+  const { error } = await supabase.rpc('resolver_solicitud_registro', {
+    p_solicitud: s.id, p_aprobar: true, p_motivo: null,
+  });
+  if (error) return { ok: false, error: error.message };
+  // Push informativo opcional: nunca define el resultado de la transacción.
+  await notificarGestor(
+    s.perfilId, '✅ Solicitud aprobada',
+    'Tu cuenta ya está activa. Inicia sesión para recibir servicios.',
+    'solicitud_aprobada', s.id,
+  );
 
   return { ok: true };
 }
@@ -139,10 +118,9 @@ export async function rechazarSolicitudReal(
   motivo: string,
   adminId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const { error } = await supabase
-    .from('solicitudes_registro')
-    .update({ estado: 'rechazado', motivo_rechazo: motivo.trim(), revisado_por: adminId, revisado_en: new Date().toISOString() })
-    .eq('id', s.id);
+  const { error } = await supabase.rpc('resolver_solicitud_registro', {
+    p_solicitud: s.id, p_aprobar: false, p_motivo: motivo.trim(),
+  });
   if (error) return { ok: false, error: error.message };
   await notificarGestor(
     s.perfilId,
