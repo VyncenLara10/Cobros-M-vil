@@ -98,15 +98,56 @@ create policy "staff lee creditos" on public.creditos_cliente
     )
   );
 
--- Para evitar que una aplicación modificada cambie montos, propietario y estado
--- arbitrariamente, solo el administrador puede hacer UPDATE directo.
--- La toma de servicios se realiza mediante RPC atómica.
-drop policy if exists "actualizar servicio, reclamar o escalar" on public.servicios;
-create policy "actualizar servicio, reclamar o escalar" on public.servicios
-  for update to authenticated using (public.es_admin()) with check (public.es_admin());
--- UPDATE de servicios por gestor no está permitido, salvo RPC explícitas.
--- NOTA: los módulos de fases/completar/escalar necesitan RPC propias ANTES
--- de activar esta política en producción. No aplicar esta migración parcialmente.
+-- Mantener el flujo existente, pero validar todas las transiciones en servidor.
+-- Un trabajador no puede cambiar valores financieros, cliente o asignación ajena.
+create or replace function public.validar_cambio_servicio()
+returns trigger language plpgsql security definer set search_path = ''
+as $
+declare u uuid := auth.uid();
+begin
+  if public.es_admin() then return new; end if;
+  if u is null or not exists(select 1 from public.perfiles
+      where id=u and activo and rol<>'admin') then
+    raise exception 'Cuenta sin autorización';
+  end if;
+  if (to_jsonb(new) - array['gestor_id','estado','fase','partes_estado','notas',
+                                  'tipo','escalado_por','tipo_gestion_legal']::text[])
+     is distinct from
+     (to_jsonb(old) - array['gestor_id','estado','fase','partes_estado','notas',
+                                  'tipo','escalado_por','tipo_gestion_legal']::text[]) then
+    raise exception 'El gestor no puede modificar campos protegidos';
+  end if;
+  if old.estado='pendiente' and old.gestor_id is null
+     and new.estado='activo' and new.gestor_id=u and new.fase='aceptado'
+     and new.tipo=old.tipo and new.escalado_por is not distinct from old.escalado_por
+     and public.rol_elegible(public.rol_de(u),old.tipo) then
+    return new;
+  end if;
+  if old.gestor_id is distinct from u or old.estado <> 'activo' then
+    raise exception 'El caso no está asignado al usuario en estado activo';
+  end if;
+  if new.tipo=old.tipo and new.escalado_por is not distinct from old.escalado_por then
+    if new.gestor_id=u and new.estado in ('activo','completado','no_localizado','fallido') then
+      return new;
+    end if;
+    if new.gestor_id is null and new.estado='pendiente' and new.fase is null then
+      return new; -- devolver al pool
+    end if;
+  end if;
+  if new.tipo='legal' and old.tipo<>'legal' and new.estado='pendiente'
+     and new.gestor_id is null and new.escalado_por=u and new.fase is null then
+    return new;
+  end if;
+  raise exception 'Transición de servicio inválida';
+end;
+$;
+drop trigger if exists validar_cambio_servicio on public.servicios;
+create trigger validar_cambio_servicio before update on public.servicios
+for each row execute function public.validar_cambio_servicio();
+
+-- Mantener la política de UPDATE para las acciones ya existentes, mientras el
+-- trigger valida que los cambios autorizados no afecten campos protegidos.
+-- No abrir permisos adicionales aquí.
 
 -- Escritura de estadísticas financieras y métricas reservada al servidor.
 alter table public.gestores_stats enable row level security;
