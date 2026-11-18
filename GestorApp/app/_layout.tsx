@@ -10,7 +10,7 @@ function RegistroPush() {
   const { usuario } = useSesion();
   useEffect(() => {
     if (usuario) registrarPushToken();
-  }, [usuario?.id]);
+  }, [usuario]);
   return null;
 }
 
