@@ -226,6 +226,9 @@ begin
 end;
 $$;
 
+-- Conservar el tipo de cuenta recibido del formulario.
+alter table public.solicitudes_registro add column if not exists tipo_cuenta text;
+
 -- Solicitudes: el candidato solo ve su propio estado; no puede autoaprobarse.
 alter table public.solicitudes_registro enable row level security;
 drop policy if exists "crear mi solicitud" on public.solicitudes_registro;
