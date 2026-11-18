@@ -56,9 +56,14 @@ export default function FormularioNotificacionScreen() {
 
   const confirmarLlegada = async () => {
     setConfirmando(true);
-    await marcarEnSitio(servicio.id);
-    setConfirmando(false);
-    setEnSitioForzado(true);
+    try {
+      await marcarEnSitio(servicio.id);
+      setEnSitioForzado(true);
+    } catch (error) {
+      Alert.alert('No se pudo confirmar la llegada', error instanceof Error ? error.message : 'Reintenta.');
+    } finally {
+      setConfirmando(false);
+    }
   };
 
   const enviar = async () => {
@@ -67,6 +72,7 @@ export default function FormularioNotificacionScreen() {
       return;
     }
     setEnviando(true);
+    try {
     const notaFinal = [
       contacto ? `Número conseguido: ${contacto}${nombreContacto ? ` (${nombreContacto})` : ''}` : '',
       notas,
@@ -81,6 +87,11 @@ export default function FormularioNotificacionScreen() {
     Alert.alert('✅ Notificación registrada', `Resultado: ${RESULTADOS.find((r) => r.id === resultado)?.label}.`, [
       { text: 'OK', onPress: () => router.back() },
     ]);
+    } catch (error) {
+      Alert.alert('No se pudo guardar', error instanceof Error ? error.message : 'Verifica la conexión e inténtalo otra vez.');
+    } finally {
+      setEnviando(false);
+    }
   };
 
   if (!enSitio) {
