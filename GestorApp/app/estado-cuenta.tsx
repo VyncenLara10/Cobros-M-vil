@@ -28,6 +28,8 @@ const DOCUMENTOS = [
   ['doc_foto_perfil', 'Fotografía de perfil'],
 ] as const;
 
+function selloArchivo(): string { return Date.now().toString(); }
+
 export default function EstadoCuenta() {
   const router = useRouter();
   const { cerrarSesion } = useSesion();
@@ -53,7 +55,10 @@ export default function EstadoCuenta() {
     else { setSolicitud(data); setMensaje(null); }
     setCargando(false);
   }, []);
-  useEffect(() => { void actualizar(); }, [actualizar]);
+  useEffect(() => {
+    const tarea = setTimeout(() => { void actualizar(); }, 0);
+    return () => clearTimeout(tarea);
+  }, [actualizar]);
 
   const elegirDocumento = async (columna: string) => {
     const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -78,7 +83,7 @@ export default function EstadoCuenta() {
       }
       const extension = blob.type === 'image/png' ? 'png' : 'jpg';
       // Nombre nuevo, nunca sobrescribe la evidencia rechazada.
-      const ruta = `${auth.user.id}/${columna}_${Date.now()}.${extension}`;
+      const ruta = `${auth.user.id}/${columna}_${selloArchivo()}.${extension}`;
       const { error } = await supabase.storage.from('documentos')
         .upload(ruta, blob, { contentType: blob.type, upsert: false });
       if (error) throw error;
