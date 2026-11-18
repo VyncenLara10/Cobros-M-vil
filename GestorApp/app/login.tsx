@@ -68,8 +68,9 @@ export default function LoginScreen() {
     setVerificando(true);
     const r = await autenticarConBiometria();
     if (r.ok) {
-      await restaurarSesionGuardada();
-      router.replace('/(tabs)');
+      const restaurada = await restaurarSesionGuardada();
+      if (restaurada) router.replace('/(tabs)');
+      else setError('Debes iniciar sesión otra vez para verificar tus permisos.');
     } else if (r.error) {
       setError(r.error);
     }
@@ -91,6 +92,10 @@ export default function LoginScreen() {
     }
     if (r.requiereMfa) {
       setModo('mfa');
+      return;
+    }
+    if (r.pendiente) {
+      router.replace('/estado-cuenta');
       return;
     }
     router.replace('/(tabs)');
@@ -125,7 +130,7 @@ export default function LoginScreen() {
       setError(r.error);
       return;
     }
-    router.replace('/(tabs)');
+    router.replace(r.pendiente ? '/estado-cuenta' : '/(tabs)');
   };
 
   const acceso = (rol: RolApp) => {
