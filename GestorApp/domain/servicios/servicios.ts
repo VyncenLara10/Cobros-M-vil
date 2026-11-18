@@ -663,18 +663,8 @@ export async function escalarALegal(servicioId: string): Promise<{ ok: boolean; 
 
   registrarEvento(servicioId, 'escalado_legal');
 
-  // Broadcast a los abogados (RLS: "staff crea notificaciones" con check true).
-  const nombreCliente =
-    (actual?.cliente as { nombre?: string } | null)?.nombre?.trim() || 'un cliente';
-  const { error: errNotif } = await supabase.from('notificaciones').insert({
-    perfil_id: null,
-    rol_destino: 'abogado',
-    titulo: '⚖️ Caso escalado a legal',
-    cuerpo: `${nombreCliente}: un gestor escaló este caso a gestión legal. Ábrelo desde la pestaña Legal para tomarlo.`,
-    tipo: 'servicio_escalado',
-    referencia_id: servicioId,
-  });
-  if (errNotif) console.warn('[servicios] escalarALegal notificación', errNotif.message);
+  // El trigger SQL avisar_escalado_legal publica la oferta en servidor.
+  // El cliente nunca necesita permiso para escribir notificaciones ajenas.
 
   return { ok: true };
 }
