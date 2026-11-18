@@ -29,6 +29,7 @@ export interface SolicitudRegistro {
   placaVehiculo?: string;
   zonaCobertura: ZonaCobertura | null;
   banco: string;
+  tipoCuenta?: string;
   numeroCuenta: string;
   nombreTitular: string;
   documentos: {
@@ -104,6 +105,7 @@ export function enviarSolicitudRegistro(datos: DatosRegistro): SolicitudRegistro
     placaVehiculo: datos.placaVehiculo || undefined,
     zonaCobertura: datos.zonaCobertura,
     banco: datos.banco,
+    tipoCuenta: datos.tipoCuenta,
     numeroCuenta: datos.numeroCuenta,
     nombreTitular: datos.nombreTitular,
     documentos: {
