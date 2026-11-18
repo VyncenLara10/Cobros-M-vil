@@ -705,8 +705,8 @@ export async function marcarEnSitio(servicioId: string): Promise<void> {
     return;
   }
   const { error } = await supabase.from('servicios').update({ fase: 'en_sitio' }).eq('id', servicioId);
-  if (error) console.warn('[servicios] marcarEnSitio', error.message);
-  else registrarEvento(servicioId, 'en_sitio');
+  if (error) throw new Error('No se pudo registrar la llegada: ' + error.message);
+  registrarEvento(servicioId, 'en_sitio');
 }
 
 function patchCliente(cambios?: Partial<Cliente>): Record<string, any> {
@@ -738,8 +738,8 @@ export async function completarServicio(
     .from('servicios')
     .update({ estado: estadoFinal, fase: null, notas: notasFinal })
     .eq('id', servicio.id);
-  if (error) console.warn('[servicios] completarServicio', error.message);
-  else registrarEvento(servicio.id, estadoFinal);
+  if (error) throw new Error('No se pudo completar el servicio: ' + error.message);
+  registrarEvento(servicio.id, estadoFinal);
 
   const patch = patchCliente(extra?.clienteActualizado);
   if (Object.keys(patch).length > 0 && servicio.cliente.clienteId) {
@@ -803,8 +803,8 @@ export async function completarParte(
   }
 
   const { error } = await supabase.from('servicios').update(patchServicio).eq('id', servicio.id);
-  if (error) console.warn('[servicios] completarParte', error.message);
-  else if (completoTodo) registrarEvento(servicio.id, 'completado');
+  if (error) throw new Error('No se pudo guardar la verificación: ' + error.message);
+  if (completoTodo) registrarEvento(servicio.id, 'completado');
 
   const patch = patchCliente(extra?.clienteActualizado);
   if (Object.keys(patch).length > 0 && servicio.cliente.clienteId) {
