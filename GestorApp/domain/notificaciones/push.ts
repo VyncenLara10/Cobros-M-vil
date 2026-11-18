@@ -86,13 +86,8 @@ export async function registrarPushToken(): Promise<string | null> {
             { onConflict: 'expo_push_token' },
           );
         if (error) console.warn('[push] no se pudo guardar el token', error.message);
-        // Limpia tokens viejos de este perfil (reinstalaciones/cambios de device).
-        const { error: errPodar } = await supabase
-          .from('push_tokens')
-          .delete()
-          .eq('perfil_id', uid)
-          .neq('expo_push_token', token);
-        if (errPodar) console.warn('[push] no se pudieron podar tokens', errPodar.message);
+        // No borrar todos los otros tokens: un gestor puede tener varios
+        // dispositivos registrados. Los inválidos se depuran con recibos Expo.
       }
     }
     return token;
