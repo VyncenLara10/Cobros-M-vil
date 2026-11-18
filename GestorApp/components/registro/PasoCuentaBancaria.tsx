@@ -26,8 +26,8 @@ export default function PasoCuentaBancaria({
       <View style={styles.avisoSeguridad}>
         <Ionicons name="lock-closed-outline" size={16} color={Colors.info} />
         <Text style={styles.avisoSeguridadTexto}>
-          Tu numero de cuenta se guarda cifrado y no se muestra completo
-          en ninguna pantalla
+          La empresa utiliza estos datos para realizar tus pagos.
+          Solo administración debe consultarlos.
         </Text>
       </View>
 
