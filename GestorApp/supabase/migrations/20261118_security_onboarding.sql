@@ -140,7 +140,7 @@ begin
   end if;
   raise exception 'Transición de servicio inválida';
 end;
-$;
+$$;
 drop trigger if exists validar_cambio_servicio on public.servicios;
 create trigger validar_cambio_servicio before update on public.servicios
 for each row execute function public.validar_cambio_servicio();
@@ -172,7 +172,7 @@ begin
     values(auth.uid(),p_disponible);
   end if;
 end;
-$;
+$$;
 revoke all on function public.cambiar_mi_disponibilidad(boolean) from public, anon;
 grant execute on function public.cambiar_mi_disponibilidad(boolean) to authenticated;
 
