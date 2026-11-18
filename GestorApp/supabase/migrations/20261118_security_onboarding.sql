@@ -301,6 +301,27 @@ create policy "actualizar mis documentos" on storage.objects
   using (bucket_id='documentos' and (storage.foldername(name))[1]=auth.uid()::text)
   with check (bucket_id='documentos' and (storage.foldername(name))[1]=auth.uid()::text);
 
+-- Lectura independiente por destinatario, también para ofertas broadcast.
+-- El contenido de notificaciones sigue sujeto a RLS de la tabla original.
+create table if not exists public.notificaciones_vistas (
+  perfil_id uuid not null references public.perfiles(id) on delete cascade,
+  notificacion_id uuid not null references public.notificaciones(id) on delete cascade,
+  leida_en timestamptz not null default now(),
+  primary key (perfil_id, notificacion_id)
+);
+alter table public.notificaciones_vistas enable row level security;
+drop policy if exists "leer mis marcas" on public.notificaciones_vistas;
+create policy "leer mis marcas" on public.notificaciones_vistas
+  for select to authenticated using (perfil_id = auth.uid());
+drop policy if exists "marcar notificaciones visibles" on public.notificaciones_vistas;
+create policy "marcar notificaciones visibles" on public.notificaciones_vistas
+  for insert to authenticated with check (
+    perfil_id=auth.uid() and exists (
+      select 1 from public.notificaciones n where n.id=notificacion_id
+    )
+  );
+revoke update,delete on public.notificaciones_vistas from anon,authenticated;
+
 -- El cliente ya no puede inyectar notificaciones arbitrarias para otros usuarios.
 drop policy if exists "staff crea notificaciones" on public.notificaciones;
 create policy "admin crea notificaciones" on public.notificaciones
