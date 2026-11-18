@@ -40,7 +40,7 @@ export default function SeguridadScreen() {
 // ─── Sección: verificación en dos pasos (TOTP) ───────────────────────────────
 
 function SeccionMfa() {
-  const [cargando, setCargando] = useState(true);
+  const [cargando, setCargando] = useState(supabaseConfigurado);
   const [factores, setFactores] = useState<FactorMfa[]>([]);
   const [enrolando, setEnrolando] = useState<EnrolamientoTotp | null>(null);
   const [codigo, setCodigo] = useState('');
@@ -53,8 +53,10 @@ function SeccionMfa() {
   };
 
   useEffect(() => {
-    if (supabaseConfigurado) cargar();
-    else setCargando(false);
+    if (supabaseConfigurado) {
+      const tarea = setTimeout(() => { void cargar(); }, 0);
+      return () => clearTimeout(tarea);
+    }
   }, []);
 
   const iniciar = async () => {
