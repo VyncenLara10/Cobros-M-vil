@@ -176,6 +176,25 @@ $$;
 revoke all on function public.cambiar_mi_disponibilidad(boolean) from public, anon;
 grant execute on function public.cambiar_mi_disponibilidad(boolean) to authenticated;
 
+-- El escalado a legal genera avisos en servidor: el gestor NO necesita
+-- permiso para insertar mensajes arbitrarios en notificaciones.
+create or replace function public.avisar_escalado_legal()
+returns trigger language plpgsql security definer set search_path = ''
+as $$
+begin
+  if new.tipo='legal' and old.tipo <> 'legal' and new.estado='pendiente' then
+    insert into public.notificaciones(rol_destino,titulo,cuerpo,tipo,referencia_id)
+    values('abogado','Nuevo servicio legal','Hay una gestión legal pendiente de asignación.',
+      'servicio_escalado',new.id);
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists avisar_escalado_legal on public.servicios;
+create trigger avisar_escalado_legal after update on public.servicios
+for each row execute function public.avisar_escalado_legal();
+
+-- Una cuenta desactivada no debe seguir accediendo a información interna.
 -- Solicitudes: el candidato solo ve su propio estado; no puede autoaprobarse.
 alter table public.solicitudes_registro enable row level security;
 drop policy if exists "crear mi solicitud" on public.solicitudes_registro;
