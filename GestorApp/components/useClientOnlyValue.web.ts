@@ -2,5 +2,5 @@ import { useSyncExternalStore } from 'react';
 
 const subscribe = () => () => {};
 export function useClientOnlyValue<S, C>(server: S, client: C): S | C {
-  return useSyncExternalStore(subscribe, () => client, () => server);
+  return useSyncExternalStore<S | C>(subscribe, () => client, () => server);
 }
