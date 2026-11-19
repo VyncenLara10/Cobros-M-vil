@@ -90,8 +90,10 @@ export default function RegistroScreen() {
         const rTelefono = validarTelefono(datos.telefono);
         if (!rTelefono.ok) e.telefono = rTelefono.error;
 
-        const rPassword = validarPassword(datos.password, { correo: datos.correo });
-        if (!rPassword.ok) e.password = rPassword.error;
+        if (!sesionConfirmada) {
+          const rPassword = validarPassword(datos.password, { correo: datos.correo });
+          if (!rPassword.ok) e.password = rPassword.error;
+        }
         break;
       }
 
@@ -187,7 +189,7 @@ export default function RegistroScreen() {
       case 1:
         return <PasoRol rol={datos.rol} onChange={(r: RolGestor) => cambiarCampo('rol', r)} />;
       case 2:
-        return <PasoDatosPersonales datos={datos} errores={errores} onCambiarCampo={cambiarCampo} />;
+        return <PasoDatosPersonales datos={datos} errores={errores} onCambiarCampo={cambiarCampo} cuentaExistente={sesionConfirmada} />;
       case 3:
         return <PasoDatosRol datos={datos} errores={errores} onCambiarCampo={cambiarCampo} />;
       case 4:
