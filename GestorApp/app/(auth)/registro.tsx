@@ -165,6 +165,10 @@ export default function RegistroScreen() {
         Alert.alert('No se pudo enviar la solicitud', r.error ?? 'Intenta de nuevo.');
         return;
       }
+      if (r.requiereConfirmarCorreo) {
+        router.replace({ pathname: '/(auth)/confirmar-correo', params: { correo: datos.correo.trim().toLowerCase() } });
+        return;
+      }
       router.replace('/(auth)/registro-enviado');
       return;
     }
