@@ -39,7 +39,8 @@ function Guard() {
     if (cargando) return;
     const raiz = segments[0] as string | undefined;
     const publica = !raiz || RUTAS_PUBLICAS.includes(raiz);
-    const completandoRegistro = raiz === '(auth)' && (segments as readonly string[])[1] === 'registro';
+    const rutaAuth = (segments as readonly string[])[1];
+    const completandoRegistro = raiz === '(auth)' && (rutaAuth === 'registro' || rutaAuth === 'confirmar-correo');
     if (cuentaPendiente && raiz !== 'estado-cuenta' && !completandoRegistro) {
       router.replace('/estado-cuenta');
     } else if (!usuario && !publica) {
