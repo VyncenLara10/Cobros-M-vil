@@ -22,7 +22,7 @@ export default function RegistroEnviadoScreen() {
 
       <Text style={styles.titulo}>¡Solicitud enviada!</Text>
       <Text style={styles.subtitulo}>
-        Tu registro como gestor fue enviado correctamente. El equipo revisará tu información y te notificará en menos de 24 horas.
+        Tu solicitud fue recibida. Puedes consultar su estado y cualquier corrección solicitada desde la aplicación; el tiempo de revisión dependerá del equipo de administración.
       </Text>
 
       {/* ¿Qué sigue? */}
