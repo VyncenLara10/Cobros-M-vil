@@ -193,7 +193,7 @@ export default function RegistroScreen() {
       case 3:
         return <PasoDatosRol datos={datos} errores={errores} onCambiarCampo={cambiarCampo} />;
       case 4:
-        return <PasoDocumentos onCambiarCampo={cambiarCampo} />;
+        return <PasoDocumentos datos={datos} onCambiarCampo={cambiarCampo} />;
       case 5:
         return (
           <PasoZonaCobertura
