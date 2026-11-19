@@ -6,6 +6,7 @@ import { leerBorradorRegistro } from '@/domain/auth/borradorRegistro';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { File } from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
@@ -99,17 +100,18 @@ export default function EstadoCuenta() {
     try {
       const { data: auth } = await supabase.auth.getUser();
       if (!auth.user) throw Error('Sesión vencida');
-      const respuesta = await fetch(uri);
-      const blob = await respuesta.blob();
-      if (blob.size > 8 * 1024 * 1024) throw Error('Máximo 8 MB por documento');
-      if (!['image/jpeg','image/png'].includes(blob.type)) {
-        throw Error('Solo se permiten imágenes JPG o PNG');
+      const archivo = new File(uri);
+      if (!archivo.exists || archivo.size < 100 || archivo.size > 8 * 1024 * 1024) {
+        throw new Error('Fotografía no disponible o demasiado grande (máximo 8 MB).');
       }
-      const extension = blob.type === 'image/png' ? 'png' : 'jpg';
-      // Nombre nuevo, nunca sobrescribe la evidencia rechazada.
+      const buffer = await archivo.arrayBuffer();
+      const extension = uri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
       const ruta = `${auth.user.id}/${columna}_${selloArchivo()}.${extension}`;
       const { error } = await supabase.storage.from('documentos')
-        .upload(ruta, blob, { contentType: blob.type, upsert: false });
+        .upload(ruta, buffer, {
+          contentType: extension === 'png' ? 'image/png' : 'image/jpeg',
+          upsert: false,
+        });
       if (error) throw error;
       setDocumentos((prev) => ({ ...prev, [columna]: ruta }));
       setMensaje('Documento cargado. Envíalo a revisión cuando termines.');
