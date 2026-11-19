@@ -1,6 +1,7 @@
 /** Confirma el correo sin abrir localhost: usa el OTP de Supabase Auth. */
 import { Colors, Spacing, Typography } from '@/constants/DesignTokens';
 import { supabase } from '@/lib/supabase';
+import { terminarRegistroConfirmado } from '@/domain/auth/registro';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
@@ -32,7 +33,15 @@ export default function ConfirmarCorreoScreen() {
         router.replace('/login');
         return;
       }
-      Alert.alert('Correo confirmado', 'Inicia o termina tu solicitud de trabajador para que administración pueda revisarla.');
+      const envio = await terminarRegistroConfirmado();
+      if (!envio.ok && !envio.sinBorrador) {
+        Alert.alert('Correo confirmado', 'El correo ya está verificado, pero faltó enviar la solicitud: ' +
+          envio.error + '. Puedes reintentar desde Estado de mi cuenta.');
+      } else {
+        Alert.alert('Correo confirmado',
+          envio.ok ? 'La solicitud y sus documentos están enviados. Ya estás esperando aprobación.' :
+            'Puedes completar tu solicitud desde Estado de mi cuenta.');
+      }
       router.replace('/estado-cuenta');
     } catch (error) {
       Alert.alert('No se pudo confirmar',
