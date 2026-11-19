@@ -24,12 +24,19 @@ const CAMPOS_DOCUMENTOS: { campo: keyof DatosRegistro; columna: string }[] = [
 ];
 
 async function subirDocumento(userId: string, columna: string, uriLocal: string): Promise<string> {
-  const archivo = new File(uriLocal);
-  if (!archivo.exists) throw new Error('No se encontró la foto ' + columna);
-  if (archivo.size < 100 || archivo.size > 8 * 1024 * 1024) {
+  let bytes: ArrayBuffer;
+  if (Platform.OS === 'web') {
+    const response = await fetch(uriLocal);
+    if (!response.ok) throw new Error('No se pudo leer ' + columna);
+    bytes = await response.arrayBuffer();
+  } else {
+    const archivo = new File(uriLocal);
+    if (!archivo.exists) throw new Error('No se encontró la foto ' + columna);
+    bytes = await archivo.arrayBuffer();
+  }
+  if (bytes.byteLength < 100 || bytes.byteLength > 8 * 1024 * 1024) {
     throw new Error('El archivo ' + columna + ' debe pesar entre 100 bytes y 8 MB.');
   }
-  const bytes = await archivo.arrayBuffer();
   const extension = uriLocal.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
   const mime = extension === 'png' ? 'image/png' : 'image/jpeg';
   const ruta = userId + '/' + columna + '_' + Date.now() + '_' + Math.floor(Math.random() * 100000) + '.' + extension;
