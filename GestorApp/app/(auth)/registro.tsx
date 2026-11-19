@@ -13,12 +13,13 @@ import Progress from '@/components/registro/Progress';
 import { Colors, Spacing, Typography } from '@/constants/DesignTokens';
 import { enviarSolicitudRegistro } from '@/data/solicitudesRegistro';
 import { enviarRegistroReal } from '@/domain/auth/registro';
+import { leerBorradorRegistro } from '@/domain/auth/borradorRegistro';
 import { validarColegiado, validarDPI, validarEmail, validarNombre, validarNumeroCuenta, validarPassword, validarPlaca, validarTelefono } from '@/domain/validators';
 import { useBottomInset } from '@/hooks/useBottomInset';
-import { supabaseConfigurado } from '@/lib/supabase';
+import { supabase, supabaseConfigurado } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -41,6 +42,23 @@ export default function RegistroScreen() {
   const [datos, setDatos] = useState<DatosRegistro>(datosRegistroVacios);
   const [errores, setErrores] = useState<Partial<Record<keyof DatosRegistro, string>>>({});
   const [enviando, setEnviando] = useState(false);
+  const [sesionConfirmada, setSesionConfirmada] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!supabaseConfigurado) return;
+    void (async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!mounted || !auth.user?.email) return;
+      setSesionConfirmada(true);
+      const borrador = await leerBorradorRegistro(auth.user.email);
+      if (!mounted) return;
+      // No rehidratar secretos ni rutas temporales de archivos.
+      if (borrador) setDatos(prev => ({ ...prev, ...borrador, correo: auth.user!.email!, password: '' }));
+      else setDatos(prev => ({ ...prev, correo: auth.user!.email!, nombreCompleto: auth.user!.user_metadata?.nombre ?? prev.nombreCompleto }));
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   const cambiarCampo = <K extends keyof DatosRegistro>(campo: K, valor: DatosRegistro[K]) => {
     setDatos((prev) => ({ ...prev, [campo]: valor }));
