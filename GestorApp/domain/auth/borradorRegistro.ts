@@ -44,7 +44,8 @@ export async function guardarBorradorRegistro(datos: DatosRegistro): Promise<voi
   };
   const texto = JSON.stringify(borrador);
   await borrarBorradorRegistro();
-  const partes = texto.match(new RegExp(`.{1,${TAMANIO}`, 'gs')) ?? [];
+  const partes: string[] = [];
+  for (let i = 0; i < texto.length; i += TAMANIO) partes.push(texto.slice(i, i + TAMANIO));
   if (partes.length > 20) return; // sin guardar datos incompletos
   for (let i = 0; i < partes.length; i++) {
     await SecureStore.setItemAsync(`${PREFIJO}_${i}`, partes[i]);
