@@ -27,6 +27,7 @@ export default function PasoDatosPersonales({
 
       <DocumentUploader
         titulo="Fotografia de perfil"
+        value={datos.fotoPerfilUri}
         descripcion="Foto clara de tu rostro, sin lentes oscuros ni gorra"
         obligatorio
         onChange={(uri) => onCambiarCampo('fotoPerfilUri', uri)}
