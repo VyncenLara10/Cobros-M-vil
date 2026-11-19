@@ -311,6 +311,9 @@ useEffect(() => {
           email: correo.trim(),
           password: clave,
         });
+        if (error?.code === 'email_not_confirmed' || error?.message?.toLowerCase().includes('email not confirmed')) {
+          return { ok: false, error: 'Antes de ingresar, confirma tu correo desde el mensaje enviado por Supabase. Después inicia sesión y completa tu solicitud.' };
+        }
         if (error || !data.user) return { ok: false, error: registrarFallo(correo) };
 
         if (await faltaSegundoFactor()) {
