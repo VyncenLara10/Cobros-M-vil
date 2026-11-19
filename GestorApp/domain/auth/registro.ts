@@ -2,6 +2,8 @@ import { DatosRegistro } from '@/components/(auth)/tipos-registro';
 import { zonaATexto } from '@/domain/aprobaciones/aprobaciones';
 import { guardarBorradorRegistro, borrarBorradorRegistro } from '@/domain/auth/borradorRegistro';
 import { supabase, supabaseConfigurado } from '@/lib/supabase';
+import * as Linking from 'expo-linking';
+import { Platform } from 'react-native';
 
 export interface ResultadoRegistro {
   ok: boolean;
@@ -60,6 +62,12 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
       email: correo,
       password: datos.password,
       options: {
+        // Evita el redirect predeterminado a localhost del proyecto Supabase.
+        // La APK usa el esquema registrado en app.json. El método alternativo
+        // por código OTP funciona incluso si el correo se abre en otra app.
+        emailRedirectTo: Platform.OS === 'web'
+          ? (typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : undefined)
+          : Linking.createURL('auth/callback', { scheme: 'gestorapp' }),
         data: {
           nombre: datos.nombreCompleto,
           // El rol de un trabajador no se toma de los metadatos para permisos.
