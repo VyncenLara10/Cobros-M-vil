@@ -136,6 +136,14 @@ export default function EstadoCuenta() {
               Motivo de la revisión: {solicitud.motivo_rechazo}
             </Text>
           ) : null}
+          {!solicitud ? (
+            <Pressable onPress={() => router.push('/(auth)/registro')}
+              style={{ backgroundColor: Colors.primary, padding: 14, borderRadius: 10 }}>
+              <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '700' }}>
+                Completar solicitud y adjuntar documentos
+              </Text>
+            </Pressable>
+          ) : null}
           {solicitud?.estado === 'rechazado' ? (
             <View style={{ gap: 12 }}>
               {DOCUMENTOS.map(([columna, nombre]) => (
