@@ -68,25 +68,13 @@ export default function DocumentUploader({
       const resultado = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         quality: 0.7,
-        allowsEditing: true,
+        allowsEditing: false,
       });
       aplicarResultado(resultado);
     } catch (e) {
       console.warn('[documentuploader] error abriendo la galería', e);
       Alert.alert('No se pudo abrir la galería', 'Intenta de nuevo.');
     }
-  };
-
-  const seleccionarImagen = () => {
-    if (Platform.OS === 'web') {
-      elegirDeGaleria();
-      return;
-    }
-    Alert.alert('Adjuntar foto', '¿De dónde la sacas?', [
-      { text: 'Tomar foto', onPress: tomarFoto },
-      { text: 'Elegir de galería', onPress: elegirDeGaleria },
-      { text: 'Cancelar', style: 'cancel' },
-    ]);
   };
 
   const quitarImagen = () => {
@@ -118,10 +106,18 @@ export default function DocumentUploader({
           </Pressable>
         </View>
       ) : (
-        <Pressable style={styles.dropZone} onPress={seleccionarImagen}>
-          <Ionicons name="cloud-upload-outline" size={26} color={Colors.textSecondary} />
-          <Text style={styles.dropZoneText}>Tocar para adjuntar foto</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          {Platform.OS !== 'web' && (
+            <Pressable style={[styles.dropZone, { flex: 1 }]} onPress={() => void tomarFoto()}>
+              <Ionicons name="camera-outline" size={25} color={Colors.textSecondary} />
+              <Text style={styles.dropZoneText}>Tomar foto</Text>
+            </Pressable>
+          )}
+          <Pressable style={[styles.dropZone, { flex: 1 }]} onPress={() => void elegirDeGaleria()}>
+            <Ionicons name="images-outline" size={25} color={Colors.textSecondary} />
+            <Text style={styles.dropZoneText}>Galería</Text>
+          </Pressable>
+        </View>
       )}
     </View>
   );
