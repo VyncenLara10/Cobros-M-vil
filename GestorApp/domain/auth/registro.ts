@@ -55,6 +55,12 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
     return { ok: false, error: 'El correo del formulario debe coincidir con tu sesión. Cierra sesión para registrar otro usuario.' };
   }
   if (!userId) {
+    // Guardar fotos ANTES de crear la cuenta; el correo puede tardar en confirmarse.
+    try { await guardarBorradorRegistro(datos); }
+    catch (error) {
+      return { ok: false, error: 'No se pudo conservar el registro: ' +
+        (error instanceof Error ? error.message : 'Error al guardar los archivos') };
+    }
     const { data: alta, error: errorAlta } = await supabase.auth.signUp({
       email: correo,
       password: datos.password,
@@ -77,16 +83,15 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
     });
     if (errorAlta) return { ok: false, error: errorAlta.message };
     if (!alta.user) return { ok: false, error: 'No se pudo registrar la cuenta.' };
-    if (!alta.session) {
-      try {
-        await guardarBorradorRegistro(datos);
-      } catch (error) {
-        console.warn('[registro] borrador temporal no disponible', error);
-      }
-      return { ok: true, requiereConfirmarCorreo: true };
-    }
+    if (!alta.session) return { ok: true, requiereConfirmarCorreo: true };
+
     userId = alta.user.id;
   }
+  const borrador = await leerBorradorRegistro(correo);
+  const datosFinales: DatosRegistro = borrador
+    ? { ...datos, ...borrador, password: '' }
+    : datos;
+
   // No modificar una solicitud existente ni volver a registrar candidatos.
   const { data: existente, error: buscarError } = await supabase
     .from('solicitudes_registro')
@@ -101,12 +106,12 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
 
 
   // Sin fotos obligatorias no hay solicitud lista para revisión.
-  const obligatorios = datos.rol === 'abogado'
+  const obligatorios = datosFinales.rol === 'abogado'
     ? ['fotoPerfilUri', 'dpiFrenteUri', 'dpiReversoUri', 'antecedentesPenalesUri', 'carneColegiadoUri']
     : ['fotoPerfilUri', 'dpiFrenteUri', 'dpiReversoUri', 'antecedentesPenalesUri',
        'licenciaUri', 'tarjetaCirculacionUri', 'fotoVehiculoUri'];
   for (const campo of obligatorios) {
-    if (!datos[campo as keyof DatosRegistro]) {
+    if (!datosFinales[campo as keyof DatosRegistro]) {
       return { ok: false, error: 'Debes adjuntar todos los documentos obligatorios, incluido ' + campo };
     }
   }
@@ -114,7 +119,7 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
   const documentos: Record<string, string | null> = {};
   try {
     for (const { campo, columna } of CAMPOS_DOCUMENTOS) {
-      const uri = datos[campo] as string | null;
+      const uri = datosFinales[campo] as string | null;
       documentos[columna] = uri ? await subirDocumento(userId!, columna, uri) : null;
     }
   } catch (error) {
@@ -124,19 +129,19 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
 
   const { error: errorSolicitud } = await supabase.from('solicitudes_registro').insert({
     perfil_id: userId,
-    rol: datos.rol,
-    nombre_completo: datos.nombreCompleto,
-    correo: datos.correo.trim(),
-    telefono: datos.telefono,
-    dpi_numero: datos.dpiNumero,
-    numero_colegiado: datos.numeroColegiado || null,
-    tipo_vehiculo: datos.tipoVehiculo || null,
-    placa_vehiculo: datos.placaVehiculo || null,
-    zona_cobertura: datos.zonaCobertura,
-    banco: datos.banco,
-    tipo_cuenta: datos.tipoCuenta,
-    numero_cuenta: datos.numeroCuenta,
-    nombre_titular: datos.nombreTitular,
+    rol: datosFinales.rol,
+    nombre_completo: datosFinales.nombreCompleto,
+    correo: datosFinales.correo.trim(),
+    telefono: datosFinales.telefono,
+    dpi_numero: datosFinales.dpiNumero,
+    numero_colegiado: datosFinales.numeroColegiado || null,
+    tipo_vehiculo: datosFinales.tipoVehiculo || null,
+    placa_vehiculo: datosFinales.placaVehiculo || null,
+    zona_cobertura: datosFinales.zonaCobertura,
+    banco: datosFinales.banco,
+    tipo_cuenta: datosFinales.tipoCuenta,
+    numero_cuenta: datosFinales.numeroCuenta,
+    nombre_titular: datosFinales.nombreTitular,
     ...documentos,
   });
 
