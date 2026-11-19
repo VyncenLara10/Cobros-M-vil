@@ -1,6 +1,7 @@
 import { DatosRegistro } from '@/components/(auth)/tipos-registro';
 import { zonaATexto } from '@/domain/aprobaciones/aprobaciones';
-import { guardarBorradorRegistro, borrarBorradorRegistro } from '@/domain/auth/borradorRegistro';
+import { guardarBorradorRegistro, borrarBorradorRegistro, leerBorradorRegistro } from '@/domain/auth/borradorRegistro';
+import { File } from 'expo-file-system';
 import { supabase, supabaseConfigurado } from '@/lib/supabase';
 import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
@@ -23,22 +24,18 @@ const CAMPOS_DOCUMENTOS: { campo: keyof DatosRegistro; columna: string }[] = [
 ];
 
 async function subirDocumento(userId: string, columna: string, uriLocal: string): Promise<string> {
-  const respuesta = await fetch(uriLocal);
-  if (!respuesta.ok) throw new Error('No se pudo leer ' + columna);
-  const blob = await respuesta.blob();
-  if (blob.size < 100 || blob.size > 8 * 1024 * 1024) {
-    throw new Error('El documento ' + columna + ' debe pesar entre 100 bytes y 8 MB.');
+  const archivo = new File(uriLocal);
+  if (!archivo.exists) throw new Error('No se encontró la foto ' + columna);
+  if (archivo.size < 100 || archivo.size > 8 * 1024 * 1024) {
+    throw new Error('El archivo ' + columna + ' debe pesar entre 100 bytes y 8 MB.');
   }
-  if (!['image/jpeg', 'image/png'].includes(blob.type)) {
-    throw new Error('El documento ' + columna + ' debe ser JPG o PNG.');
-  }
-  const extension = blob.type === 'image/png' ? 'png' : 'jpg';
-  const ruta = `${userId}/${columna}_${Date.now()}_${Math.floor(Math.random() * 100000)}.${extension}`;
-  const { error } = await supabase.storage.from('documentos').upload(ruta, blob, {
-    upsert: false,
-    contentType: blob.type,
-  });
-  if (error) throw new Error('No se pudo guardar ' + columna + ': ' + error.message);
+  const bytes = await archivo.arrayBuffer();
+  const extension = uriLocal.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+  const mime = extension === 'png' ? 'image/png' : 'image/jpeg';
+  const ruta = userId + '/' + columna + '_' + Date.now() + '_' + Math.floor(Math.random() * 100000) + '.' + extension;
+  const { error } = await supabase.storage.from('documentos').upload(ruta, bytes,
+    { upsert: false, contentType: mime });
+  if (error) throw new Error('No se pudo subir ' + columna + ': ' + error.message);
   return ruta;
 }
 
