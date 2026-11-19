@@ -45,6 +45,18 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
   }
   if (!datos.rol) return { ok: false, error: 'Falta seleccionar el rol.' };
 
+  // Antes del alta, no permitir perfiles huérfanos por fotografías incompletas.
+  // Se requieren todas las fotos del rol para poder conservarlas localmente.
+  const requeridos = datos.rol === 'abogado'
+    ? ['fotoPerfilUri', 'dpiFrenteUri', 'dpiReversoUri', 'antecedentesPenalesUri', 'carneColegiadoUri']
+    : ['fotoPerfilUri', 'dpiFrenteUri', 'dpiReversoUri', 'antecedentesPenalesUri',
+       'licenciaUri', 'tarjetaCirculacionUri', 'fotoVehiculoUri'];
+  for (const campo of requeridos) {
+    if (!datos[campo as keyof DatosRegistro]) {
+      return { ok: false, error: 'Falta una fotografía o documento obligatorio: ' + campo };
+    }
+  }
+
   const correo = datos.correo.trim().toLowerCase();
   // Si el email ya fue confirmado y el candidato inició sesión, NO hacer
   // signUp otra vez. Así se recuperan altas que dejaron un perfil inactivo
