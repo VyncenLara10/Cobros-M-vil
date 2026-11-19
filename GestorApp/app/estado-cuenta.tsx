@@ -1,6 +1,8 @@
 /** Portal limitado para candidatos: sin acceso a servicios ni datos del equipo. */
 import { Colors, Spacing, Typography } from '@/constants/DesignTokens';
 import { useSesion } from '@/domain/auth/sesion';
+import { terminarRegistroConfirmado } from '@/domain/auth/registro';
+import { leerBorradorRegistro } from '@/domain/auth/borradorRegistro';
 import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -38,6 +40,7 @@ export default function EstadoCuenta() {
   const [procesando, setProcesando] = useState(false);
   const [documentos, setDocumentos] = useState<Record<string, string>>({});
   const [mensaje, setMensaje] = useState<string | null>(null);
+  const [puedeRecuperar, setPuedeRecuperar] = useState(false);
 
   const actualizar = useCallback(async () => {
     setCargando(true);
@@ -52,7 +55,28 @@ export default function EstadoCuenta() {
       .eq('perfil_id', auth.user.id)
       .order('creado_en', { ascending: false }).limit(1).maybeSingle();
     if (error) setMensaje('No se pudo consultar el estado: ' + error.message);
-    else { setSolicitud(data); setMensaje(null); }
+    else {
+      setSolicitud(data);
+      if (!data) {
+        const borrador = await leerBorradorRegistro(auth.user.email ?? '');
+        setPuedeRecuperar(!!borrador);
+        setMensaje(borrador ? 'Tu correo está confirmado, pero la solicitud aún no llegó. Vamos a reintentar enviarla.' : null);
+        if (borrador) {
+          const enviado = await terminarRegistroConfirmado();
+          if (enviado.ok) {
+            setPuedeRecuperar(false);
+            const { data: nueva } = await supabase.from('solicitudes_registro')
+              .select('id, estado, motivo_rechazo, creado_en, revisado_en')
+              .eq('perfil_id', auth.user.id).order('creado_en', { ascending: false })
+              .limit(1).maybeSingle();
+            if (nueva) { setSolicitud(nueva); setMensaje(null); }
+            else setMensaje('Se envió la solicitud, pero no se pudo consultar el estado. Actualiza.');
+          } else {
+            setMensaje('No se pudo completar el registro: ' + (enviado.error ?? 'Verifica tu conexión.'));
+          }
+        }
+      } else { setPuedeRecuperar(false); setMensaje(null); }
+    }
     setCargando(false);
   }, []);
   useEffect(() => {
@@ -135,6 +159,14 @@ export default function EstadoCuenta() {
             <Text style={{ color: Colors.textPrimary }}>
               Motivo de la revisión: {solicitud.motivo_rechazo}
             </Text>
+          ) : null}
+          {!solicitud && puedeRecuperar ? (
+            <Pressable disabled={cargando} onPress={() => void actualizar()}
+              style={{ backgroundColor: Colors.primary, padding: 14, borderRadius: 10 }}>
+              <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '700' }}>
+                Reintentar envío de mi solicitud
+              </Text>
+            </Pressable>
           ) : null}
           {!solicitud ? (
             <Pressable onPress={() => router.push('/(auth)/registro')}
