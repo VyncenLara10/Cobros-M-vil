@@ -258,6 +258,14 @@ export default function LoginScreen() {
           )}
         </View>
 
+        {supabaseConfigurado && (
+          <Pressable
+            onPress={() => router.push({ pathname: '/(auth)/confirmar-correo', params: { correo: correo.trim() } })}
+            style={styles.registroLink}>
+            <Text style={styles.registroLinkText}>¿Te registraste y recibiste un código? Confirma tu correo</Text>
+          </Pressable>
+        )}
+
         <Pressable onPress={() => router.push('/(auth)/registro')} style={styles.registroLink}>
           <Text style={styles.registroLinkText}>¿Eres nuevo gestor? <Text style={styles.registroLinkStrong}>Regístrate aquí</Text></Text>
         </Pressable>
