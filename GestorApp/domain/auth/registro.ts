@@ -1,4 +1,4 @@
-import { DatosRegistro } from '@/components/(auth)/tipos-registro';
+import { DatosRegistro, datosRegistroVacios } from '@/components/(auth)/tipos-registro';
 import { zonaATexto } from '@/domain/aprobaciones/aprobaciones';
 import { guardarBorradorRegistro, borrarBorradorRegistro, leerBorradorRegistro } from '@/domain/auth/borradorRegistro';
 import { File } from 'expo-file-system';
@@ -156,4 +156,15 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
 
   try { await borrarBorradorRegistro(); } catch { /* no afecta envío */ }
   return { ok: true };
+}
+
+/** Completa la solicitud ya capturada al regresar de confirmar email.
+ * Evita pedir de nuevo DPI, banco y fotos, y muestra cualquier error real.
+ */
+export async function terminarRegistroConfirmado(): Promise<ResultadoRegistro & { sinBorrador?: boolean }> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user?.email) return { ok: false, error: 'Debes iniciar sesión primero.' };
+  const borrador = await leerBorradorRegistro(data.user.email);
+  if (!borrador) return { ok: false, sinBorrador: true, error: 'No hay una solicitud pendiente guardada en este dispositivo.' };
+  return enviarRegistroReal({ ...datosRegistroVacios, ...borrador, password: '' });
 }
