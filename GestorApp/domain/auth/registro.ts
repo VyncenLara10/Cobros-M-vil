@@ -1,10 +1,12 @@
 import { DatosRegistro } from '@/components/(auth)/tipos-registro';
 import { zonaATexto } from '@/domain/aprobaciones/aprobaciones';
+import { guardarBorradorRegistro, borrarBorradorRegistro } from '@/domain/auth/borradorRegistro';
 import { supabase, supabaseConfigurado } from '@/lib/supabase';
 
 export interface ResultadoRegistro {
   ok: boolean;
   error?: string;
+  requiereConfirmarCorreo?: boolean;
 }
 
 const CAMPOS_DOCUMENTOS: { campo: keyof DatosRegistro; columna: string }[] = [
@@ -18,25 +20,24 @@ const CAMPOS_DOCUMENTOS: { campo: keyof DatosRegistro; columna: string }[] = [
   { campo: 'carneColegiadoUri', columna: 'doc_carne_colegiado' },
 ];
 
-async function subirDocumento(userId: string, columna: string, uriLocal: string): Promise<string | null> {
-  try {
-    const respuesta = await fetch(uriLocal);
-    const blob = await respuesta.blob();
-    const extension = (blob.type?.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
-    const ruta = `${userId}/${columna}.${extension}`;
-    const { error } = await supabase.storage.from('documentos').upload(ruta, blob, {
-      upsert: true,
-      contentType: blob.type || 'image/jpeg',
-    });
-    if (error) {
-      console.warn('[registro] no se pudo subir', columna, error.message);
-      return null;
-    }
-    return ruta;
-  } catch (e) {
-    console.warn('[registro] error subiendo documento', columna, e);
-    return null;
+async function subirDocumento(userId: string, columna: string, uriLocal: string): Promise<string> {
+  const respuesta = await fetch(uriLocal);
+  if (!respuesta.ok) throw new Error('No se pudo leer ' + columna);
+  const blob = await respuesta.blob();
+  if (blob.size < 100 || blob.size > 8 * 1024 * 1024) {
+    throw new Error('El documento ' + columna + ' debe pesar entre 100 bytes y 8 MB.');
   }
+  if (!['image/jpeg', 'image/png'].includes(blob.type)) {
+    throw new Error('El documento ' + columna + ' debe ser JPG o PNG.');
+  }
+  const extension = blob.type === 'image/png' ? 'png' : 'jpg';
+  const ruta = `${userId}/${columna}_${Date.now()}_${Math.floor(Math.random() * 100000)}.${extension}`;
+  const { error } = await supabase.storage.from('documentos').upload(ruta, blob, {
+    upsert: false,
+    contentType: blob.type,
+  });
+  if (error) throw new Error('No se pudo guardar ' + columna + ': ' + error.message);
+  return ruta;
 }
 
 export async function enviarRegistroReal(datos: DatosRegistro): Promise<ResultadoRegistro> {
@@ -45,46 +46,77 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
   }
   if (!datos.rol) return { ok: false, error: 'Falta seleccionar el rol.' };
 
-  // La metadata viaja a raw_user_meta_data y el trigger `crear_perfil_nuevo_usuario`
-  // la copia a public.perfiles (teléfono, zona, colegiado) al crear el perfil.
-  const { data: alta, error: errorAlta } = await supabase.auth.signUp({
-    email: datos.correo.trim(),
-    password: datos.password,
-    options: {
-      data: {
-        nombre: datos.nombreCompleto,
-        rol: datos.rol,
-        telefono: datos.telefono,
-        zona: zonaATexto(datos.zonaCobertura),
-        numero_colegiado: datos.numeroColegiado || null,
+  const correo = datos.correo.trim().toLowerCase();
+  // Si el email ya fue confirmado y el candidato inició sesión, NO hacer
+  // signUp otra vez. Así se recuperan altas que dejaron un perfil inactivo
+  // pero todavía no crearon solicitudes_registro.
+  const { data: actual } = await supabase.auth.getUser();
+  let userId = actual.user?.id;
+  if (actual.user && actual.user.email?.trim().toLowerCase() !== correo) {
+    return { ok: false, error: 'El correo del formulario debe coincidir con tu sesión. Cierra sesión para registrar otro usuario.' };
+  }
+  if (!userId) {
+    const { data: alta, error: errorAlta } = await supabase.auth.signUp({
+      email: correo,
+      password: datos.password,
+      options: {
+        data: {
+          nombre: datos.nombreCompleto,
+          // El rol de un trabajador no se toma de los metadatos para permisos.
+          rol: datos.rol,
+          telefono: datos.telefono,
+          zona: zonaATexto(datos.zonaCobertura),
+          numero_colegiado: datos.numeroColegiado || null,
+        },
       },
-    },
-  });
-  if (errorAlta) return { ok: false, error: errorAlta.message };
-  if (!alta.user) return { ok: false, error: 'No se pudo crear la cuenta. Intenta de nuevo.' };
-
-  // Si "Confirm email" está activo en Supabase, signUp NO devuelve sesión y lo
-  // que sigue (subir docs + insertar la solicitud) corre sin JWT → RLS lo
-  // rechaza con un error críptico. Mejor cortar aquí con un mensaje claro.
-  if (!alta.session) {
-    return {
-      ok: false,
-      error:
-        'La cuenta se creó pero tu correo debe confirmarse antes de enviar la solicitud. ' +
-        'Para pruebas, desactiva "Confirm email" en Supabase (Authentication → Providers → Email) y vuelve a registrarte.',
-    };
+    });
+    if (errorAlta) return { ok: false, error: errorAlta.message };
+    if (!alta.user) return { ok: false, error: 'No se pudo registrar la cuenta.' };
+    if (!alta.session) {
+      try {
+        await guardarBorradorRegistro(datos);
+      } catch (error) {
+        console.warn('[registro] borrador temporal no disponible', error);
+      }
+      return { ok: true, requiereConfirmarCorreo: true };
+    }
+    userId = alta.user.id;
+  }
+  // No modificar una solicitud existente ni volver a registrar candidatos.
+  const { data: existente, error: buscarError } = await supabase
+    .from('solicitudes_registro')
+    .select('id, estado')
+    .eq('perfil_id', userId)
+    .limit(1)
+    .maybeSingle();
+  if (buscarError) return { ok: false, error: buscarError.message };
+  if (existente) {
+    return { ok: false, error: 'Ya existe una solicitud para esta cuenta. Consulta Estado de mi cuenta.' };
   }
 
-  const userId = alta.user.id;
+
+  // Sin fotos obligatorias no hay solicitud lista para revisión.
+  const obligatorios = datos.rol === 'abogado'
+    ? ['fotoPerfilUri', 'dpiFrenteUri', 'dpiReversoUri', 'antecedentesPenalesUri', 'carneColegiadoUri']
+    : ['fotoPerfilUri', 'dpiFrenteUri', 'dpiReversoUri', 'antecedentesPenalesUri',
+       'licenciaUri', 'tarjetaCirculacionUri', 'fotoVehiculoUri'];
+  for (const campo of obligatorios) {
+    if (!datos[campo as keyof DatosRegistro]) {
+      return { ok: false, error: 'Debes adjuntar todos los documentos obligatorios, incluido ' + campo };
+    }
+  }
 
   const documentos: Record<string, string | null> = {};
-  await Promise.all(
-    CAMPOS_DOCUMENTOS.map(async ({ campo, columna }) => {
+  try {
+    for (const { campo, columna } of CAMPOS_DOCUMENTOS) {
       const uri = datos[campo] as string | null;
-      documentos[columna] = uri ? await subirDocumento(userId, columna, uri) : null;
-    }),
-  );
-  
+      documentos[columna] = uri ? await subirDocumento(userId!, columna, uri) : null;
+    }
+  } catch (error) {
+    // Solicitud aún NO creada; el usuario puede reintentar sin duplicar cuenta.
+    return { ok: false, error: error instanceof Error ? error.message : 'No se pudo guardar la documentación.' };
+  }
+
   const { error: errorSolicitud } = await supabase.from('solicitudes_registro').insert({
     perfil_id: userId,
     rol: datos.rol,
@@ -112,5 +144,6 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
     };
   }
 
+  try { await borrarBorradorRegistro(); } catch { /* no afecta envío */ }
   return { ok: true };
 }
