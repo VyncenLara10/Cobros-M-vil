@@ -6,7 +6,6 @@
 import ServiceCard from '@/components/ServiceCard';
 import { Colors as COLORS, Spacing as SPACING } from '@/constants/DesignTokens';
 import { useSesion } from '@/domain/auth/sesion';
-import { supabase } from '@/lib/supabase';
 import { contarNoLeidas } from '@/domain/notificaciones/notificaciones';
 import { aceptarServicio } from '@/domain/servicios/servicios';
 import { useServiciosEnTiempoReal, useServiciosVisibles } from '@/hooks/useServicios';
@@ -25,11 +24,6 @@ import {
   Text,
   View,
 } from 'react-native';
-
-// Marcador de versión y referencia pública del proyecto; nunca incluye credenciales.
-const DIAGNOSTICO_PREVIEW = process.env.EXPO_PUBLIC_DIAGNOSTICO_SERVICIOS === '1';
-const SUPABASE_REF = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '')
-  .match(/^https:\/\/([a-z0-9-]+)\.supabase\.co/i)?.[1] ?? 'no identificado';
 
 // ─── Tabs de filtro ──────────────────────────────────────────────────────────
 
@@ -124,7 +118,6 @@ export default function PanelServiciosScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [aceptandoId, setAceptandoId] = useState<string | null>(null);
   const [noLeidas, setNoLeidas] = useState(0);
-  const [diagnostico, setDiagnostico] = useState('Consultando permisos de Supabase…');
 
   // Cada quien ve solo lo suyo: el admin ve todo, un gestor ve sus propios
   // servicios (cualquier estado) + lo pendiente elegible para su rol.
@@ -140,27 +133,6 @@ export default function PanelServiciosScreen() {
     }
     refrescar();
   }, [refrescar]));
-
-  // Solo en la APK preview: evidencia qué proyecto se conectó y cuántas
-  // filas puede leer la sesión directamente, independientemente de joins.
-  const consultarDiagnostico = useCallback(async () => {
-    if (!DIAGNOSTICO_PREVIEW || !usuario) return;
-    try {
-      const [permiso, filas] = await Promise.all([
-        supabase.rpc('es_admin'),
-        supabase.from('servicios').select('id', { count: 'exact', head: true }),
-      ]);
-      const rolDB = permiso.error ? 'error: ' + permiso.error.message :
-        permiso.data === true ? 'sí' : 'no';
-      const numFilas = filas.error ? 'error: ' + filas.error.message :
-        String(filas.count ?? 'desconocido');
-      setDiagnostico('Admin según BD: ' + rolDB + ' · Filas visibles: ' + numFilas);
-    } catch (error) {
-      setDiagnostico('Error de diagnóstico: ' +
-        (error instanceof Error ? error.message : 'sin conexión'));
-    }
-  }, [usuario?.id, usuario?.rol]);
-  useFocusEffect(useCallback(() => { void consultarDiagnostico(); }, [consultarDiagnostico]));
 
   // Aparece un servicio nuevo elegible → notificación local + refetch.
   useServiciosEnTiempoReal(usuario, refrescar);
@@ -238,24 +210,6 @@ export default function PanelServiciosScreen() {
           )}
         </Pressable>
       </View>
-
-      {DIAGNOSTICO_PREVIEW && (
-        <View style={{ marginHorizontal: SPACING.lg, marginBottom: SPACING.sm,
-          padding: SPACING.sm, backgroundColor: COLORS.surface, borderRadius: 8 }}>
-          <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.info }}>
-            PRUEBA SVC-R3 · Supabase: {SUPABASE_REF}
-          </Text>
-          <Text style={{ fontSize: 11, color: COLORS.textSecondary, marginTop: 3 }}>
-            Rol app: {usuario?.rol ?? 'sin sesión'} · {diagnostico}
-          </Text>
-          <Pressable onPress={() => { void consultarDiagnostico(); refrescar(); }}
-            style={{ alignSelf: 'flex-start', paddingTop: 5 }}>
-            <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.info }}>
-              Volver a diagnosticar
-            </Text>
-          </Pressable>
-        </View>
-      )}
 
       {/* Métricas (calculadas de los servicios reales cargados) */}
       <MetricasBar servicios={visibles} />
