@@ -5,6 +5,7 @@ import { buscarClienteDB, ClienteBusqueda, crearServicio } from '@/domain/servic
 import { useBottomInset } from '@/hooks/useBottomInset';
 import { ROL_LABEL, ROLES_ELEGIBLES, SubtipoVerificacion, TipoServicio } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import * as Location from 'expo-location';
 import { useState } from 'react';
 import {
@@ -254,6 +255,8 @@ export default function NuevoServicioScreen() {
   const [datos, setDatos] = useState<DatosCliente>(datosVacios);
   const [errores, setErrores] = useState<Partial<DatosCliente>>({});
   const [enviando, setEnviando] = useState(false);
+  const [servicioPublicadoId, setServicioPublicadoId] = useState<string | null>(null);
+  const [advertenciaPublicacion, setAdvertenciaPublicacion] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalBuscar, setModalBuscar] = useState(false);
   const [clienteVinculado, setClienteVinculado] = useState<ClienteBusqueda | null>(null);
@@ -327,7 +330,7 @@ export default function NuevoServicioScreen() {
   };
 
   const simularEnvio = async () => {
-    if (!validarCliente() || !tipoSeleccionado) return;
+    if (enviando || !validarCliente() || !tipoSeleccionado) return;
     setEnviando(true);
     const tipoLegalInfo = GESTIONES_LEGALES.find((g) => g.id === tipoLegal);
     const resultado = await crearServicio({
@@ -356,6 +359,8 @@ export default function NuevoServicioScreen() {
       Alert.alert('No se pudo publicar la solicitud', resultado.error ?? 'Intenta de nuevo.');
       return;
     }
+    setServicioPublicadoId(resultado.id ?? null);
+    setAdvertenciaPublicacion(resultado.advertencia ?? null);
     setNotif(generarNotificacion(tipoSeleccionado, datos, {
       tipoLegal: tipoLegal ?? undefined,
       comisionPct,
@@ -376,6 +381,8 @@ export default function NuevoServicioScreen() {
     setUbicacionActual(null);
     setErrores({});
     setNotif(null);
+    setServicioPublicadoId(null);
+    setAdvertenciaPublicacion(null);
   };
 
   // ── Paso 1: tipo ────────────────────────────────────────────────────────
@@ -644,8 +651,19 @@ export default function NuevoServicioScreen() {
               ))}
 
               <View style={styles.modalDivider} />
-              <Text style={styles.modalExito}>✅ Solicitud publicada. El sistema buscará gestores elegibles en la zona.</Text>
+              <Text style={styles.modalExito}>✅ Servicio guardado en la base de datos. Los gestores elegibles podrán consultarlo.</Text>
+              {advertenciaPublicacion ? (
+                <Text style={[styles.modalMensaje, { color: Colors.danger, marginTop: 10 }]}>
+                  Atención: {advertenciaPublicacion}
+                </Text>
+              ) : null}
 
+              {servicioPublicadoId ? (
+                <PrimaryButton label="Abrir servicio creado" onPress={() => {
+                  setModalVisible(false);
+                  router.push(`/servicio/${servicioPublicadoId}`);
+                }} style={{ marginTop: Spacing.lg }} />
+              ) : null}
               <PrimaryButton label="Crear otra solicitud" onPress={reiniciar} style={{ marginTop: Spacing.lg }} />
               <Pressable onPress={() => setModalVisible(false)} style={styles.modalVerDetalle}>
                 <Text style={styles.modalVerDetalleText}>Cerrar</Text>
