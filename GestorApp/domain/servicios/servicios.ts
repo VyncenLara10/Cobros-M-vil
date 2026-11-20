@@ -692,10 +692,7 @@ export async function serviciosEscaladosPor(gestorId: string): Promise<Servicio[
     .select(SELECT_SERVICIO)
     .eq('escalado_por', gestorId)
     .order('fecha_asignacion', { ascending: false });
-  if (error) {
-    console.warn('[servicios] serviciosEscaladosPor', error.message);
-    return [];
-  }
+  if (error) throw new Error('No se pudieron cargar los casos escalados: ' + error.message);
   return (data ?? []).map(mapServicio);
 }
 
@@ -709,8 +706,11 @@ export async function marcarEnSitio(servicioId: string): Promise<void> {
     Mocks.marcarEnSitio(servicioId);
     return;
   }
-  const { error } = await supabase.from('servicios').update({ fase: 'en_sitio' }).eq('id', servicioId);
+  const { data, error } = await supabase.from('servicios')
+    .update({ fase: 'en_sitio' }).eq('id', servicioId)
+    .eq('estado', 'activo').select('id').maybeSingle();
   if (error) throw new Error('No se pudo registrar la llegada: ' + error.message);
+  if (!data) throw new Error('No tienes un servicio activo asignado para confirmar la llegada.');
   registrarEvento(servicioId, 'en_sitio');
 }
 
@@ -739,11 +739,13 @@ export async function completarServicio(
   const notaGestor = extra?.notaGestor?.trim();
   const notasFinal = notaGestor ? (servicio.notas ? `${servicio.notas}\n— ${notaGestor}` : notaGestor) : servicio.notas;
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('servicios')
     .update({ estado: estadoFinal, fase: null, notas: notasFinal })
-    .eq('id', servicio.id);
+    .eq('id', servicio.id).eq('estado', 'activo')
+    .select('id').maybeSingle();
   if (error) throw new Error('No se pudo completar el servicio: ' + error.message);
+  if (!data) throw new Error('No se actualizó ningún servicio. Comprueba la asignación y el estado.');
   registrarEvento(servicio.id, estadoFinal);
 
   const patch = patchCliente(extra?.clienteActualizado);
@@ -773,9 +775,12 @@ export async function marcarEnSitioParte(servicio: Servicio, sub: SubtipoVerific
   }
   const actual = servicio.partesEstado ?? {};
   const nuevo = { ...actual, [sub]: { ...(actual[sub] ?? { enSitio: false, completado: false }), enSitio: true } };
-  const { error } = await supabase.from('servicios').update({ partes_estado: nuevo }).eq('id', servicio.id);
-  if (error) console.warn('[servicios] marcarEnSitioParte', error.message);
-  else registrarEvento(servicio.id, 'en_sitio');
+  const { data, error } = await supabase.from('servicios')
+    .update({ partes_estado: nuevo }).eq('id', servicio.id)
+    .eq('estado', 'activo').select('id').maybeSingle();
+  if (error) throw new Error('No se pudo confirmar la llegada: ' + error.message);
+  if (!data) throw new Error('No se actualizó la verificación. Comprueba que siga asignada a ti.');
+  registrarEvento(servicio.id, 'en_sitio');
 }
 
 export async function completarParte(
