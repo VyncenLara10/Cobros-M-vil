@@ -121,7 +121,7 @@ export default function PanelServiciosScreen() {
 
   // Cada quien ve solo lo suyo: el admin ve todo, un gestor ve sus propios
   // servicios (cualquier estado) + lo pendiente elegible para su rol.
-  const { servicios: visibles, cargando, refrescar } = useServiciosVisibles(usuario);
+  const { servicios: visibles, cargando, error: errorServicios, refrescar } = useServiciosVisibles(usuario);
 
   // Aparece un servicio nuevo elegible → notificación local + refetch.
   useServiciosEnTiempoReal(usuario, refrescar);
@@ -218,7 +218,18 @@ export default function PanelServiciosScreen() {
       </View>
 
       {/* Lista de servicios */}
-      {cargando && serviciosFiltrados.length === 0 ? (
+      {errorServicios ? (
+        <View style={[styles.emptyState, { paddingHorizontal: 24 }]}>
+          <Ionicons name="alert-circle-outline" size={42} color={COLORS.danger} />
+          <Text style={styles.emptyTitle}>No se pudo cargar la lista</Text>
+          <Text style={[styles.emptySub, { textAlign: 'center', marginTop: 8 }]}>
+            {errorServicios}
+          </Text>
+          <Pressable onPress={refrescar} style={{ padding: 14, marginTop: 14, backgroundColor: COLORS.primary, borderRadius: 12 }}>
+            <Text style={{ color: '#fff', fontWeight: '700' }}>Reintentar consulta</Text>
+          </Pressable>
+        </View>
+      ) : cargando && serviciosFiltrados.length === 0 ? (
         <View style={styles.emptyState}>
           <ActivityIndicator color={COLORS.info} />
         </View>
