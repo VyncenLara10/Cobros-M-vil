@@ -434,7 +434,6 @@ export default function DetalleServicioScreen() {
         <View style={styles.badgeRow}>
           <BadgeTipo tipo={servicio.tipo} />
           <BadgeEstado estado={servicio.estado} />
-          {usuario?.rol === 'admin' && <Text style={styles.idText}>{servicio.id}</Text>}
         </View>
 
         {/* Nombre del cliente */}
@@ -753,7 +752,6 @@ const styles = StyleSheet.create({
   backText: { fontSize: 14, color: COLORS.accent, fontWeight: '600' },
 
   badgeRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.sm },
-  idText: { fontSize: 11, color: COLORS.textMuted, fontFamily: 'monospace', marginLeft: 'auto' },
 
   clienteNombre: { fontSize: 22, fontWeight: '700', color: COLORS.text, marginBottom: SPACING.lg },
 
