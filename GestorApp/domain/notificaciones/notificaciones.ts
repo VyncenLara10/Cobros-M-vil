@@ -65,10 +65,20 @@ export async function cargarNotificaciones(): Promise<NotificacionApp[]> {
     // No mostrar como leídas ofertas cuya lectura no se pudo verificar.
   }
   const leidas = new Set((vistas ?? []).map((v) => v.notificacion_id));
-  return data.map((fila) => ({
+  const notificaciones = data.map((fila) => ({
     ...mapear(fila),
     leida: leidas.has(fila.id) || (fila.perfil_id !== null && !!fila.leida),
   }));
+  // Un servicio nuevo crea una notificación por rol elegible. El admin puede
+  // ver las tres por RLS, pero son una sola oferta, no tres servicios.
+  const vistasServicios = new Set<string>();
+  return notificaciones.filter((n) => {
+    if (n.tipo !== 'servicio_nuevo' || !n.referenciaId) return true;
+    const llave = `${n.tipo}:${n.referenciaId}`;
+    if (vistasServicios.has(llave)) return false;
+    vistasServicios.add(llave);
+    return true;
+  });
 }
 
 /** Cuenta no leídas, independientemente de las lecturas de otros gestores. */
