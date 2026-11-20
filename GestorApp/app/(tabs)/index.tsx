@@ -12,7 +12,7 @@ import { useServiciosEnTiempoReal, useServiciosVisibles } from '@/hooks/useServi
 import { rolPuedeAceptar, RolGestor, Servicio, TipoServicio } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   ActivityIndicator,
@@ -122,6 +122,17 @@ export default function PanelServiciosScreen() {
   // Cada quien ve solo lo suyo: el admin ve todo, un gestor ve sus propios
   // servicios (cualquier estado) + lo pendiente elegible para su rol.
   const { servicios: visibles, cargando, error: errorServicios, refrescar } = useServiciosVisibles(usuario);
+
+  // Los tabs quedan montados al navegar; si el admin publica desde Solicitar,
+  // al volver a Servicios debemos cargar la lista de nuevo automáticamente.
+  const primerFoco = useRef(true);
+  useFocusEffect(useCallback(() => {
+    if (primerFoco.current) {
+      primerFoco.current = false;
+      return;
+    }
+    refrescar();
+  }, [refrescar]));
 
   // Aparece un servicio nuevo elegible → notificación local + refetch.
   useServiciosEnTiempoReal(usuario, refrescar);
