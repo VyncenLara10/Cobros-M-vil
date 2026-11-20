@@ -7,9 +7,15 @@
 module.exports = ({ config }) => {
   const key = (process.env.GOOGLE_MAPS_ANDROID_API_KEY || '').trim();
   const enabled = !!key && process.env.EXPO_PUBLIC_MAPA_OFF !== '1';
+  // Archivo cargado en EAS como variable de entorno de tipo File (no el JSON en texto).
+  const googleServicesFile = (process.env.GOOGLE_SERVICES_JSON || '').trim();
 
   return {
     ...config,
+    android: {
+      ...config.android,
+      ...(googleServicesFile ? { googleServicesFile } : {}),
+    },
     plugins: [
       ...(config.plugins || []),
       ...(enabled ? [['react-native-maps', { androidGoogleMapsApiKey: key }]] : []),
