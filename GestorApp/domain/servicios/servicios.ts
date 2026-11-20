@@ -115,7 +115,18 @@ function mapServicio(row: any): Servicio {
     id: row.id,
     tipo: row.tipo,
     estado: row.estado,
-    cliente: mapCliente(row.cliente),
+    // La RLS de clientes protege los datos personales antes de aceptar.
+    // El servicio sigue siendo visible; nunca mostrar una tarjeta sin título.
+    cliente: row.cliente ? mapCliente(row.cliente) : mapCliente({
+      nombre: row.estado === 'pendiente' && !row.gestor_id
+        ? 'Servicio pendiente de aceptar'
+        : 'Datos del cliente no accesibles',
+      direccion: row.estado === 'pendiente' && !row.gestor_id
+        ? 'Los detalles se desbloquean al aceptar'
+        : 'Consulta con administración',
+      zona: '',
+      municipio: '',
+    }),
     deudaTotal: Number(row.deuda_total ?? 0),
     montoGestion: Number(row.monto_gestion ?? 0),
     comisionPct: Number(row.comision_pct ?? 0),
