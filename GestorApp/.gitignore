@@ -9,6 +9,12 @@ dist/
 web-build/
 expo-env.d.ts
 
+# Never commit Firebase app configuration or FCM service-account credentials
+/google-services.json
+/google-services.*.json
+/firebase-service-account*.json
+/*-firebase-adminsdk-*.json
+
 # Native
 .kotlin/
 *.orig.*
