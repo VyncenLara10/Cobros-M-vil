@@ -28,7 +28,7 @@ try {
 }
 
 // Mapa real solo si la librería existe Y el interruptor temporal no lo apaga
-// (ver MAPAS_OFF en mapa-comun.ts: mapa negro por falta de billing en Google Cloud).
+// (ver MAPAS_OFF en mapa-comun.ts: mapa sin credenciales de Google Cloud).
 const USAR_MAPA = HAY_MAPA && !MAPAS_OFF;
 
 function regionDe(puntos: { lat: number; lng: number }[]) {
