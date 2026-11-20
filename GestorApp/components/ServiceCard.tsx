@@ -20,10 +20,8 @@ export default function ServiceCard({ servicio, onPress, onAceptar, aceptando }:
   const esPendiente = servicio.estado === 'pendiente' && servicio.gestorId == null;
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => onPress(servicio.id)}
-      activeOpacity={0.75}>
+    <View style={styles.card}>
+      <TouchableOpacity onPress={() => onPress(servicio.id)} activeOpacity={0.75}>
       {/* Header (el ID interno solo lo ve el admin) */}
       <View style={styles.cardTop}>
         {usuario?.rol === 'admin' && <Text style={styles.cardId}>{servicio.id}</Text>}
@@ -66,6 +64,7 @@ export default function ServiceCard({ servicio, onPress, onAceptar, aceptando }:
         <Text style={styles.metaText}>👤 {servicio.gestorNombre}</Text>
       </View>
 
+      </TouchableOpacity>
       {/* Footer */}
       <View style={styles.footer}>
         <View>
@@ -96,7 +95,7 @@ export default function ServiceCard({ servicio, onPress, onAceptar, aceptando }:
           </View>
         )}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
