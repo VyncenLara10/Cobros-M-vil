@@ -812,8 +812,11 @@ export async function completarParte(
     patchServicio.fase = 'en_sitio';
   }
 
-  const { error } = await supabase.from('servicios').update(patchServicio).eq('id', servicio.id);
+  const { data, error } = await supabase.from('servicios')
+    .update(patchServicio).eq('id', servicio.id).eq('estado', 'activo')
+    .select('id').maybeSingle();
   if (error) throw new Error('No se pudo guardar la verificación: ' + error.message);
+  if (!data) throw new Error('No se guardó ninguna verificación. Comprueba que el caso siga activo y asignado.');
   if (completoTodo) registrarEvento(servicio.id, 'completado');
 
   const patch = patchCliente(extra?.clienteActualizado);
