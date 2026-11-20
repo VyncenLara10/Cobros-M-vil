@@ -163,7 +163,7 @@ function MapaEsquematico({ paradas, actual, alto = 220, ancho }: MapaProps) {
         <View style={styles.badgeDot} />
         <Text style={styles.badgeText}>
           {MAPAS_OFF
-            ? 'Mapa no configurado · usa tu clave de Google Cloud'
+            ? 'Mapa no disponible · consulta con administración'
             : 'Vista esquemática · instala react-native-maps'}
         </Text>
       </View>
