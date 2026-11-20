@@ -384,10 +384,11 @@ export interface NuevoServicioInput {
   ubicacion?: { lat: number; lng: number };
 }
 
-export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: boolean; error?: string }> {
-  if (!supabaseConfigurado) return { ok: true }; // modo demo: nada que persistir
+export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: boolean; id?: string; error?: string; advertencia?: string }> {
+  if (!supabaseConfigurado) return { ok: false, error: 'No está configurado Supabase. No se creó ningún servicio.' };
 
   try {
+    const advertencias: string[] = [];
     let clienteId = input.cliente.clienteId;
 
     if (!clienteId) {
@@ -447,7 +448,10 @@ export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: bo
         saldo_real: deudaTotal,
         porcentaje_comision: comisionPct,
       });
-      if (errCred) console.warn('[servicios] crearServicio creditos_cliente', errCred.message);
+      if (errCred) {
+        console.warn('[servicios] crearServicio creditos_cliente', errCred.message);
+        advertencias.push('Servicio creado, pero no se guardó el crédito: ' + errCred.message);
+      }
     }
 
     // Notificación broadcast: una fila por rol elegible, para que el canal
@@ -463,9 +467,12 @@ export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: bo
       referencia_id: svc.id,
     }));
     const { error: errNotif } = await supabase.from('notificaciones').insert(filasNotif);
-    if (errNotif) console.warn('[servicios] crearServicio notificaciones', errNotif.message);
+    if (errNotif) {
+      console.warn('[servicios] crearServicio notificaciones', errNotif.message);
+      advertencias.push('Servicio creado, pero fallaron los avisos: ' + errNotif.message);
+    }
 
-    return { ok: true };
+    return { ok: true, id: svc.id, advertencia: advertencias.join('\n') || undefined };
   } catch (e: any) {
     return { ok: false, error: e?.message ?? 'Error de conexión con la base de datos' };
   }
