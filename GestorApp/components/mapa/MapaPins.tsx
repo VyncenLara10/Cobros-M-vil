@@ -106,7 +106,7 @@ function MapaPinsEsquematico({ puntos, alto = 240, ancho }: MapaPinsProps) {
       })}
       <View style={styles.badge}>
         <View style={styles.badgeDot} />
-        <Text style={styles.badgeText}>Mapa no configurado · usa tu clave de Google Cloud</Text>
+        <Text style={styles.badgeText}>Mapa no disponible · consulta con administración</Text>
       </View>
     </View>
   );
