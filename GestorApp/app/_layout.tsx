@@ -3,7 +3,9 @@ import { SesionProvider, useSesion } from '@/domain/auth/sesion';
 import { registrarPushToken } from '@/domain/notificaciones/push';
 import { useUbicacionTracking } from '@/hooks/useUbicacionTracking';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { useEffect } from 'react';
+import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
+import { useEffect, useRef } from 'react';
 
 /** Pide permiso de notificaciones y registra el push token al iniciar sesión. */
 function RegistroPush() {
@@ -11,6 +13,43 @@ function RegistroPush() {
   useEffect(() => {
     if (usuario) registrarPushToken();
   }, [usuario]);
+  return null;
+}
+
+/** Abre el servicio asociado al pulsar una notificación local o push.
+ * Funciona cuando la app está abierta o fue iniciada desde el aviso.
+ * No permite navegar a contenido protegido sin sesión validada.
+ */
+function AperturaNotificaciones() {
+  const { usuario, cargando } = useSesion();
+  const router = useRouter();
+  const ultimaAtendida = useRef<string | null>(null);
+  useEffect(() => {
+    if (Platform.OS === 'web' || cargando || !usuario) return;
+    let activo = true;
+    const abrir = (respuesta: Notifications.NotificationResponse) => {
+      if (!activo) return;
+      const data = respuesta.notification.request.content.data;
+      const tipo = data?.tipo;
+      const id = data?.referencia_id;
+      if ((tipo !== 'servicio_nuevo' && tipo !== 'servicio_escalado') ||
+          typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return;
+      const clave = respuesta.notification.request.identifier + ':' + id;
+      if (ultimaAtendida.current === clave) return;
+      ultimaAtendida.current = clave;
+      router.push({ pathname: '/servicio/[id]', params: { id } });
+    };
+    const listener = Notifications.addNotificationResponseReceivedListener(abrir);
+    void Notifications.getLastNotificationResponseAsync().then((respuesta) => {
+      if (respuesta) abrir(respuesta);
+    }).catch((error) => {
+      console.warn('[push] no se pudo recuperar la notificación inicial', error);
+    });
+    return () => {
+      activo = false;
+      listener.remove();
+    };
+  }, [cargando, usuario?.id, router]);
   return null;
 }
 
@@ -58,6 +97,7 @@ export default function RootLayout() {
     <SesionProvider>
       <Guard />
       <RegistroPush />
+      <AperturaNotificaciones />
       <SeguimientoUbicacion />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.background } }}>
         <Stack.Screen name="index" />
