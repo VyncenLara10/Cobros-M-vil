@@ -199,7 +199,7 @@ export function useServiciosEnTiempoReal(
       `servicios-${usuario.id}`,
       { event: 'INSERT', schema: 'public', table: 'servicios' },
       (payload) => {
-        const fila = payload.new as { estado?: string; tipo?: string } | null;
+        const fila = payload.new as { id?: string; estado?: string; tipo?: string } | null;
         if (
           fila?.estado === 'pendiente' &&
           fila.tipo &&
@@ -208,6 +208,7 @@ export function useServiciosEnTiempoReal(
           notificarLocal(
             '📋 Nuevo servicio disponible',
             `Hay un nuevo servicio de ${TIPO_SERVICIO_LABEL[fila.tipo as keyof typeof TIPO_SERVICIO_LABEL]} para tu rol.`,
+            fila.id ? { tipo: 'servicio_nuevo', referencia_id: fila.id } : undefined,
           );
           callbackRef.current();
         }
