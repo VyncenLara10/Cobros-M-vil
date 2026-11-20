@@ -10,6 +10,7 @@ import {
   restaurarEvidencias,
 } from '@/domain/servicios/informes';
 import {
+  aceptarServicio,
   escalarALegal,
   marcarNoLocalizado,
   registrarIntento,
@@ -17,7 +18,7 @@ import {
 } from '@/domain/servicios/servicios';
 import { useBottomInset } from '@/hooks/useBottomInset';
 import { useServicio } from '@/hooks/useServicios';
-import { ESTADO_LABEL } from '@/types';
+import { ESTADO_LABEL, RolGestor, rolPuedeAceptar } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -195,6 +196,7 @@ export default function DetalleServicioScreen() {
   const [modalPago, setModalPago] = useState(false);
   const [modalIntento, setModalIntento] = useState(false);
   const [modalRuta, setModalRuta] = useState(false);
+  const [aceptando, setAceptando] = useState(false);
   const [eventos, setEventos] = useState<EventoServicio[]>([]);
   const [evidencias, setEvidencias] = useState<EvidenciaServicio[]>([]);
   const [evidenciaAbierta, setEvidenciaAbierta] = useState<string | null>(null);
@@ -381,16 +383,39 @@ export default function DetalleServicioScreen() {
     );
   };
 
-  const estaActivo = servicio.estado === 'activo' || servicio.estado === 'pendiente';
+  const estaActivo = servicio.estado === 'activo';
+  const esPendiente = servicio.estado === 'pendiente';
+  const puedeAceptarOferta =
+    esPendiente &&
+    servicio.gestorId == null &&
+    !!usuario &&
+    usuario.rol !== 'admin' &&
+    rolPuedeAceptar(usuario.rol as RolGestor, servicio.tipo);
+
+  const handleAceptarOferta = async () => {
+    if (!usuario || !puedeAceptarOferta || aceptando) return;
+    setAceptando(true);
+    try {
+      const resultado = await aceptarServicio(servicio.id, usuario.id, usuario.nombre);
+      if (!resultado.ok) {
+        Alert.alert('No se pudo aceptar', resultado.error ?? 'Es posible que otro gestor lo haya tomado.');
+        return;
+      }
+      refrescar();
+      Alert.alert('Servicio aceptado', 'Ya está asignado a tu cuenta. Puedes revisar los datos y comenzar la gestión.');
+    } finally {
+      setAceptando(false);
+    }
+  };
 
   // Casos legales: solo admin o el abogado asignado (o sin asignar) pueden
   // actuar. El gestor que escaló queda en SOLO LECTURA (RLS también lo bloquea).
   const puedeAccionar =
-    servicio.tipo !== 'legal'
-      ? true
-      : usuario?.rol === 'admin' ||
-        (usuario?.rol === 'abogado' &&
-          (servicio.gestorId === usuario?.id || servicio.gestorId == null));
+    estaActivo &&
+    !!usuario &&
+    (usuario.rol === 'admin' ||
+      (servicio.gestorId === usuario.id &&
+        rolPuedeAceptar(usuario.rol as RolGestor, servicio.tipo)));
 
   // El informe PDF con archivado de evidencias es exclusivo del admin y de
   // los servicios de verificación (los legales tienen su propio flujo).
@@ -564,7 +589,25 @@ export default function DetalleServicioScreen() {
           </View>
         )}
 
-        {/* ── Acciones (solo si está activo/pendiente y el rol puede tocarlo) ── */}
+        {/* Una oferta debe aceptarse ANTES de permitir acciones de campo. */}
+        {esPendiente && (
+          <View style={styles.actionsSection}>
+            <Text style={styles.cardTitle}>PENDIENTE DE ASIGNACIÓN</Text>
+            <Text style={{ color: COLORS.textSecondary, marginBottom: 12 }}>
+              {puedeAceptarOferta
+                ? 'Esta solicitud está disponible para tu rol. Acéptala para acceder a los datos completos y comenzar.'
+                : 'Aún no hay un gestor asignado o este tipo de servicio no corresponde a tu rol.'}
+            </Text>
+            {puedeAceptarOferta ? (
+              <ActionBtn icon="checkmark-circle-outline"
+                label={aceptando ? 'Aceptando servicio…' : 'Aceptar este servicio'}
+                color={COLORS.success} bg={`${COLORS.success}15`}
+                onPress={() => void handleAceptarOferta()} />
+            ) : null}
+          </View>
+        )}
+
+        {/* Acciones operativas únicamente para un servicio ya aceptado. */}
         {estaActivo && puedeAccionar && (
           <View style={styles.actionsSection}>
             <Text style={styles.cardTitle}>ACCIONES</Text>
@@ -640,7 +683,7 @@ export default function DetalleServicioScreen() {
         )}
 
         {/* Estado final si ya cerrado */}
-        {!estaActivo && (
+        {!estaActivo && !esPendiente && (
           <View style={[styles.estadoFinal, {
             backgroundColor:
               servicio.estado === 'completado' ? `${COLORS.success}12` : `${COLORS.danger}12`
