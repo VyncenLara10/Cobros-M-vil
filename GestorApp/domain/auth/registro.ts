@@ -123,6 +123,24 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
     return { ok: false, error: 'Ya existe una solicitud para esta cuenta. Consulta Estado de mi cuenta.' };
   }
 
+  // Verificar la fila padre ANTES de subir evidencias. Cuando Auth se instaló
+  // antes del trigger o quedó una cuenta huérfana, el INSERT de la solicitud
+  // fallaría por FK y dejaría archivos sueltos en Storage.
+  const { data: perfil, error: errorPerfil } = await supabase
+    .from('perfiles')
+    .select('id')
+    .eq('id', userId!)
+    .maybeSingle();
+  if (errorPerfil) {
+    return { ok: false, error: 'No se pudo verificar tu perfil: ' + errorPerfil.message };
+  }
+  if (!perfil) {
+    return { ok: false, error:
+      'Tu correo/cuenta existe pero no se encontró el perfil asociado. ' +
+      'No te registres otra vez: pide al administrador ejecutar la reparación ' +
+      '20261120_reparar_perfiles_auth.sql en Supabase y reintenta el envío.'
+    };
+  }
 
   // Sin fotos obligatorias no hay solicitud lista para revisión.
   const obligatorios = datosFinales.rol === 'abogado'
@@ -168,8 +186,10 @@ export async function enviarRegistroReal(datos: DatosRegistro): Promise<Resultad
     return {
       ok: false,
       error:
-        `Tu cuenta se creó pero no se pudo enviar la solicitud: ${errorSolicitud.message}. ` +
-        'Verifica que se haya corrido supabase/fix-registro.sql en el SQL Editor.',
+        errorSolicitud.code === '23503'
+          ? 'La solicitud no se pudo guardar porque falta un registro relacionado en Supabase (' +
+            errorSolicitud.message + '). Contacta a administración; no elimines tu cuenta.'
+          : 'No se pudo guardar la solicitud: ' + errorSolicitud.message,
     };
   }
 
