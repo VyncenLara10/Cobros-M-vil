@@ -201,7 +201,7 @@ export default function DetalleServicioScreen() {
   const [evidenciasArchivadas, setEvidenciasArchivadas] = useState(0);
   const [generandoInforme, setGenerandoInforme] = useState(false);
 
-  const { servicio, cargando, refrescar } = useServicio(id as string | undefined);
+  const { servicio, cargando, error: errorServicio, refrescar } = useServicio(id as string | undefined);
 
   // Al volver de un formulario de completado (router.back), refrescar para
   // pintar el bloque "Caso completado"; el primer foco lo omite (el hook ya
@@ -248,7 +248,15 @@ export default function DetalleServicioScreen() {
     return (
       <View style={styles.notFound}>
         <Ionicons name="alert-circle-outline" size={48} color={COLORS.textMuted} />
-        <Text style={styles.notFoundText}>Servicio no encontrado</Text>
+        <Text style={styles.notFoundText}>{errorServicio ? 'Error al consultar el servicio' : 'Servicio no encontrado o sin acceso'}</Text>
+        {errorServicio ? (
+          <Text style={[styles.notFoundText, { marginTop: 10, paddingHorizontal: 20, textAlign: 'center' }]}>
+            {errorServicio}
+          </Text>
+        ) : null}
+        <Pressable onPress={refrescar} style={{ padding: 12, marginTop: 8 }}>
+          <Text style={{ color: COLORS.info, fontWeight: '700' }}>Volver a intentar</Text>
+        </Pressable>
         <Pressable onPress={() => router.back()}>
           <Text style={{ color: COLORS.info, marginTop: 8 }}>Volver</Text>
         </Pressable>
