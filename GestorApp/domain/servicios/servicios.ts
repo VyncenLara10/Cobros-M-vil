@@ -35,7 +35,7 @@ import type { RolApp } from '@/domain/auth/sesion';
 // ─── Mapeo DB (snake_case, filas anidadas) → tipos de la app ────────────────
 
 const SELECT_SERVICIO =
-  '*, cliente:clientes(*, referencias:referencias_cliente(*)), creditos:creditos_cliente(*), intentos:intentos_servicio(*), gestor:perfiles(nombre)';
+  '*, cliente:clientes!servicios_cliente_id_fkey(*, referencias:referencias_cliente(*)), creditos:creditos_cliente(*), intentos:intentos_servicio(*), gestor:perfiles!servicios_gestor_id_fkey(nombre)';
 
 function formatearFecha(iso: string | null): string {
   if (!iso) return '';
@@ -225,8 +225,7 @@ export async function serviciosDisponiblesPara(
     .eq('estado', 'pendiente')
     .order('fecha_asignacion', { ascending: true });
   if (error) {
-    console.warn('[servicios] serviciosDisponiblesPara', error.message);
-    return [];
+    throw new Error('No se pudieron cargar los servicios (serviciosDisponiblesPara): ' + error.message);
   }
   const filtrados = (data ?? [])
     .filter((r: any) => rolPuedeAceptar(rol, r.tipo))
@@ -244,8 +243,7 @@ export async function serviciosDeGestor(gestorId: string): Promise<Servicio[]> {
     .eq('estado', 'activo')
     .order('fecha_asignacion', { ascending: true });
   if (error) {
-    console.warn('[servicios] serviciosDeGestor', error.message);
-    return [];
+    throw new Error('No se pudieron cargar los servicios (serviciosDeGestor): ' + error.message);
   }
   return (data ?? []).map(mapServicio);
 }
@@ -259,8 +257,7 @@ export async function serviciosDeGestorTodos(gestorId: string): Promise<Servicio
     .eq('gestor_id', gestorId)
     .order('fecha_asignacion', { ascending: false });
   if (error) {
-    console.warn('[servicios] serviciosDeGestorTodos', error.message);
-    return [];
+    throw new Error('No se pudieron cargar los servicios (serviciosDeGestorTodos): ' + error.message);
   }
   return (data ?? []).map(mapServicio);
 }
@@ -273,8 +270,7 @@ export async function serviciosTodos(): Promise<Servicio[]> {
     .select(SELECT_SERVICIO)
     .order('fecha_asignacion', { ascending: false });
   if (error) {
-    console.warn('[servicios] serviciosTodos', error.message);
-    return [];
+    throw new Error('No se pudieron cargar los servicios (serviciosTodos): ' + error.message);
   }
   return (data ?? []).map(mapServicio);
 }
@@ -308,7 +304,8 @@ export async function servicioPorId(id: string): Promise<Servicio | undefined> {
     return s ? { ...s } : undefined;
   }
   const { data, error } = await supabase.from('servicios').select(SELECT_SERVICIO).eq('id', id).maybeSingle();
-  if (error || !data) return undefined;
+  if (error) throw new Error('No se pudo abrir el servicio: ' + error.message);
+  if (!data) return undefined;
   return mapServicio(data);
 }
 
