@@ -10,10 +10,7 @@
       "android": {
         "buildType": "apk"
       },
-      "env": {
-        "EXPO_PUBLIC_MAPA_OFF": "1",
-        "EXPO_PUBLIC_DIAGNOSTICO_SERVICIOS": "1"
-      },
+      "env": {},
       "environment": "preview",
       "autoIncrement": true
     },
