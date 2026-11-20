@@ -30,3 +30,10 @@ jobs:
         run: npx tsc --noEmit
       - name: Expo lint
         run: npm run lint
+      - name: Verify native maps configuration (test key, not a credential)
+        env:
+          GOOGLE_MAPS_ANDROID_API_KEY: CI_TEST_MAPS_KEY_NOT_VALID
+        run: |
+          npx expo config --type introspect --json > /tmp/gestorapp-maps-config.json
+          node -e "const c=require('./app.config.js')({config:require('./app.json').expo});if(!c.extra.mapsEnabled || !c.plugins.some(p=>Array.isArray(p)&&p[0]==='react-native-maps'))process.exit(1)"
+
