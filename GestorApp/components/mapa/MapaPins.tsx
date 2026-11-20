@@ -26,7 +26,7 @@ try {
 }
 
 // Mapa real solo si la librería existe Y el interruptor temporal no lo apaga
-// (ver MAPAS_OFF en mapa-comun.ts: mapa negro por falta de billing en Google Cloud).
+// (ver MAPAS_OFF en mapa-comun.ts: mapa sin credenciales de Google Cloud).
 const USAR_MAPA = HAY_MAPA && !MAPAS_OFF;
 
 function regionDe(puntos: { lat: number; lng: number }[]) {
@@ -106,7 +106,7 @@ function MapaPinsEsquematico({ puntos, alto = 240, ancho }: MapaPinsProps) {
       })}
       <View style={styles.badge}>
         <View style={styles.badgeDot} />
-        <Text style={styles.badgeText}>Mapa apagado temporalmente · falta billing de Google</Text>
+        <Text style={styles.badgeText}>Mapa no configurado · usa tu clave de Google Cloud</Text>
       </View>
     </View>
   );
