@@ -42,6 +42,7 @@ export default function PasoDatosRol({
 
         <DocumentUploader
           titulo="Carne de colegiado activo"
+          value={datos.carneColegiadoUri}
           descripcion="Foto del carne vigente del Colegio de Abogados y Notarios"
           obligatorio
           onChange={(uri) => onCambiarCampo('carneColegiadoUri', uri)}
@@ -81,6 +82,7 @@ export default function PasoDatosRol({
 
       <DocumentUploader
         titulo="Licencia de conducir"
+        value={datos.licenciaUri}
         descripcion="Frente del documento, vigente"
         obligatorio
         onChange={(uri) => onCambiarCampo('licenciaUri', uri)}
@@ -88,6 +90,7 @@ export default function PasoDatosRol({
 
       <DocumentUploader
         titulo="Tarjeta de circulacion"
+        value={datos.tarjetaCirculacionUri}
         descripcion="Documento del vehiculo a tu nombre o autorizado"
         obligatorio
         onChange={(uri) => onCambiarCampo('tarjetaCirculacionUri', uri)}
@@ -95,6 +98,7 @@ export default function PasoDatosRol({
 
       <DocumentUploader
         titulo="Fotografia del vehiculo"
+        value={datos.fotoVehiculoUri}
         descripcion="Foto donde se vea la placa con claridad"
         obligatorio
         onChange={(uri) => onCambiarCampo('fotoVehiculoUri', uri)}

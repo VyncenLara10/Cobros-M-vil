@@ -38,7 +38,7 @@ try {
 }
 
 // Mapa real solo si la librería existe Y el interruptor temporal no lo apaga
-// (ver MAPAS_OFF en mapa-comun.ts: mapa negro por falta de billing en Google Cloud).
+// (ver MAPAS_OFF en mapa-comun.ts: mapa sin credenciales de Google Cloud).
 const USAR_MAPA = HAY_MAPA && !MAPAS_OFF;
 
 export default function MapaSeguimiento(props: MapaProps) {
@@ -163,7 +163,7 @@ function MapaEsquematico({ paradas, actual, alto = 220, ancho }: MapaProps) {
         <View style={styles.badgeDot} />
         <Text style={styles.badgeText}>
           {MAPAS_OFF
-            ? 'Mapa apagado temporalmente · falta billing de Google'
+            ? 'Mapa no disponible · consulta con administración'
             : 'Vista esquemática · instala react-native-maps'}
         </Text>
       </View>

@@ -11,6 +11,7 @@ interface DocumentUploaderProps {
   descripcion?: string;
   obligatorio?: boolean;
   onChange?: (uri: string | null) => void;
+  value?: string | null;
 }
 
 /**
@@ -24,15 +25,16 @@ export default function DocumentUploader({
   descripcion,
   obligatorio,
   onChange,
+  value,
 }: DocumentUploaderProps) {
-  const [uri, setUri] = useState<string | null>(null);
-  const [estado, setEstado] = useState<EstadoDocumento>('vacio');
+  const [localUri, setLocalUri] = useState<string | null>(null);
+  const uri = value === undefined ? localUri : value;
+
 
   const aplicarResultado = (resultado: ImagePicker.ImagePickerResult) => {
     if (!resultado.canceled && resultado.assets?.length) {
       const nuevaUri = resultado.assets[0].uri;
-      setUri(nuevaUri);
-      setEstado('cargado');
+      setLocalUri(nuevaUri);
       onChange?.(nuevaUri);
     }
   };
@@ -47,7 +49,7 @@ export default function DocumentUploader({
       const resultado = await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
         quality: 0.7,
-        allowsEditing: true,
+        allowsEditing: false,
       });
       aplicarResultado(resultado);
     } catch (e) {
@@ -66,7 +68,7 @@ export default function DocumentUploader({
       const resultado = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         quality: 0.7,
-        allowsEditing: true,
+        allowsEditing: false,
       });
       aplicarResultado(resultado);
     } catch (e) {
@@ -75,21 +77,8 @@ export default function DocumentUploader({
     }
   };
 
-  const seleccionarImagen = () => {
-    if (Platform.OS === 'web') {
-      elegirDeGaleria();
-      return;
-    }
-    Alert.alert('Adjuntar foto', '¿De dónde la sacas?', [
-      { text: 'Tomar foto', onPress: tomarFoto },
-      { text: 'Elegir de galería', onPress: elegirDeGaleria },
-      { text: 'Cancelar', style: 'cancel' },
-    ]);
-  };
-
   const quitarImagen = () => {
-    setUri(null);
-    setEstado('vacio');
+    setLocalUri(null);
     onChange?.(null);
   };
 
@@ -100,7 +89,7 @@ export default function DocumentUploader({
           {titulo}
           {obligatorio ? <Text style={styles.required}> *</Text> : null}
         </Text>
-        {estado === 'cargado' ? (
+        {!!uri ? (
           <View style={styles.badgeOk}>
             <Ionicons name="checkmark-circle" size={13} color={Colors.success} />
             <Text style={styles.badgeOkText}>Adjuntado</Text>
@@ -117,10 +106,18 @@ export default function DocumentUploader({
           </Pressable>
         </View>
       ) : (
-        <Pressable style={styles.dropZone} onPress={seleccionarImagen}>
-          <Ionicons name="cloud-upload-outline" size={26} color={Colors.textSecondary} />
-          <Text style={styles.dropZoneText}>Tocar para adjuntar foto</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          {Platform.OS !== 'web' && (
+            <Pressable style={[styles.dropZone, { flex: 1 }]} onPress={() => void tomarFoto()}>
+              <Ionicons name="camera-outline" size={25} color={Colors.textSecondary} />
+              <Text style={styles.dropZoneText}>Tomar foto</Text>
+            </Pressable>
+          )}
+          <Pressable style={[styles.dropZone, { flex: 1 }]} onPress={() => void elegirDeGaleria()}>
+            <Ionicons name="images-outline" size={25} color={Colors.textSecondary} />
+            <Text style={styles.dropZoneText}>Galería</Text>
+          </Pressable>
+        </View>
       )}
     </View>
   );

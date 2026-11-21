@@ -7,12 +7,14 @@ import { StyleSheet, Text, View } from 'react-native';
 
 interface PasoDatosPersonalesProps {
   datos: DatosRegistro;
+  cuentaExistente?: boolean;
   errores: Partial<Record<keyof DatosRegistro, string>>;
   onCambiarCampo: <K extends keyof DatosRegistro>(campo: K, valor: DatosRegistro[K]) => void;
 }
 
 export default function PasoDatosPersonales({
   datos,
+  cuentaExistente = false,
   errores,
   onCambiarCampo,
 }: PasoDatosPersonalesProps) {
@@ -25,6 +27,7 @@ export default function PasoDatosPersonales({
 
       <DocumentUploader
         titulo="Fotografia de perfil"
+        value={datos.fotoPerfilUri}
         descripcion="Foto clara de tu rostro, sin lentes oscuros ni gorra"
         obligatorio
         onChange={(uri) => onCambiarCampo('fotoPerfilUri', uri)}
@@ -74,7 +77,7 @@ export default function PasoDatosPersonales({
         error={errores.telefono}
       />
 
-      <FormInput
+      {!cuentaExistente && <FormInput
         label="Contrasena"
         placeholder="Minimo 8 caracteres"
         required
@@ -84,7 +87,7 @@ export default function PasoDatosPersonales({
         onChangeText={(t) => onCambiarCampo('password', t)}
         error={errores.password}
         hint={!errores.password ? 'Mayúscula, minúscula, número y símbolo (ej. !@#$%)' : undefined}
-      />
+      />}
     </View>
   );
 }

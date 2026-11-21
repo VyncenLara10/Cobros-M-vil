@@ -37,7 +37,7 @@ export default function AuthCallbackScreen() {
         router.replace('/login');
         return;
       }
-      router.replace('/(tabs)');
+      router.replace(r.pendiente ? '/estado-cuenta' : '/(tabs)');
     })();
   }, [code, completarMagicLink]);
 

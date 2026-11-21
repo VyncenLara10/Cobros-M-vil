@@ -193,15 +193,18 @@ export default function VerificacionScreen() {
       return;
     }
     setEnviando(true);
+    try {
     const clienteActualizado = esDom
       ? cli.cambios
       : { ...(dirLaboral ? { direccionLaboral: dirLaboral } : {}), ...(zonaLaboral ? { zonaLaboral } : {}) };
+    // Primero asegurar que las evidencias existan; no finalizar antes de subirlas.
+    const evid = await subirEvidencias(servicio.id, fotos);
+    if (evid.fallidas > 0) throw new Error('No se pudieron subir todas las fotografías. Reintenta antes de finalizar.');
     const { completoTodo } = await completarParte(servicio, parteActiva, {
       notaGestor: observaciones,
       clienteActualizado,
       dictamen,
     });
-    const evid = await subirEvidencias(servicio.id, fotos);
     setEnviando(false);
     const avisoFotos =
       evid.fallidas > 0 ? `\n⚠️ No se pudieron subir ${evid.fallidas} foto(s); verifica tu conexión.` : '';
@@ -212,6 +215,11 @@ export default function VerificacionScreen() {
         : 'Falta la otra parte; dirígete a la siguiente ubicación para completarla.') + avisoFotos,
       [{ text: 'OK', onPress: () => router.back() }],
     );
+    } catch (error) {
+      Alert.alert('No se pudo guardar', error instanceof Error ? error.message : 'Verifica la conexión e inténtalo otra vez.');
+    } finally {
+      setEnviando(false);
+    }
   };
 
   // Candado de esta parte

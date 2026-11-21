@@ -1,0 +1,39 @@
+name: Verify Expo app
+on:
+  pull_request:
+    paths:
+      - 'GestorApp/**'
+      - '.github/workflows/expo-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'GestorApp/**'
+      - '.github/workflows/expo-check.yml'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: GestorApp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: GestorApp/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --no-audit
+      - name: TypeScript
+        run: npx tsc --noEmit
+      - name: Expo lint
+        run: npm run lint
+      - name: Verify native maps configuration (test key, not a credential)
+        env:
+          GOOGLE_MAPS_ANDROID_API_KEY: CI_TEST_MAPS_KEY_NOT_VALID
+        run: |
+          npx expo config --type introspect --json > /tmp/gestorapp-maps-config.json
+          node -e "const c=require('./app.config.js')({config:require('./app.json').expo});if(!c.extra.mapsEnabled || !c.plugins.some(p=>Array.isArray(p)&&p[0]==='react-native-maps'))process.exit(1)"
+

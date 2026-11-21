@@ -180,10 +180,12 @@ export interface ResultadoLogin {
   ok: boolean;
   error?: string;
   requiereMfa?: boolean;
+  pendiente?: boolean;
 }
 
 interface SesionCtx {
   usuario: Usuario | null;
+  cuentaPendiente: boolean;
   cargando: boolean;
   iniciarSesion: (correo: string, clave: string) => Promise<ResultadoLogin>;
   completarMagicLink: (codigoPkce: string) => Promise<ResultadoLogin>;
@@ -197,6 +199,7 @@ const Ctx = createContext<SesionCtx | null>(null);
 
 export function SesionProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
+  const [cuentaPendiente, setCuentaPendiente] = useState(false);
   const [cargando, setCargando] = useState(supabaseConfigurado);
 
   // ── Inactividad: último gesto del usuario (ruta, app activa, touch, tecla) ──
@@ -262,7 +265,10 @@ useEffect(() => {
         const perfil = await cargarPerfilDesdeDB(user.id);
         if (perfil?.activo) {
           setUsuario(perfil.usuario);
+          setCuentaPendiente(false);
           await guardarSesion(perfil.usuario);
+        } else if (perfil) {
+          setCuentaPendiente(true);
         }
       }
       setCargando(false);
@@ -271,6 +277,7 @@ useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         setUsuario(null);
+        setCuentaPendiente(false);
         borrarSesionGuardada();
       }
     });
@@ -280,6 +287,7 @@ useEffect(() => {
   const valor = useMemo<SesionCtx>(
     () => ({
       usuario,
+      cuentaPendiente,
       cargando,
 
       iniciarSesion: async (correo, clave) => {
@@ -303,6 +311,9 @@ useEffect(() => {
           email: correo.trim(),
           password: clave,
         });
+        if (error?.code === 'email_not_confirmed' || error?.message?.toLowerCase().includes('email not confirmed')) {
+          return { ok: false, error: 'Antes de ingresar, confirma tu correo desde el mensaje enviado por Supabase. Después inicia sesión y completa tu solicitud.' };
+        }
         if (error || !data.user) return { ok: false, error: registrarFallo(correo) };
 
         if (await faltaSegundoFactor()) {
@@ -316,10 +327,11 @@ useEffect(() => {
           return { ok: false, error: 'No se encontró tu perfil. Contacta al administrador.' };
         }
         if (!perfil.activo) {
-          await supabase.auth.signOut();
-          return { ok: false, error: 'Tu cuenta está pendiente de aprobación por el administrador.' };
+          setCuentaPendiente(true);
+          return { ok: true, pendiente: true };
         }
         setUsuario(perfil.usuario);
+        setCuentaPendiente(false);
         await guardarSesion(perfil.usuario);
         return { ok: true };
       },
@@ -343,10 +355,11 @@ useEffect(() => {
           return { ok: false, error: 'No se encontró tu perfil. Contacta al administrador.' };
         }
         if (!perfil.activo) {
-          await supabase.auth.signOut();
-          return { ok: false, error: 'Tu cuenta está pendiente de aprobación por el administrador.' };
+          setCuentaPendiente(true);
+          return { ok: true, pendiente: true };
         }
         setUsuario(perfil.usuario);
+        setCuentaPendiente(false);
         await guardarSesion(perfil.usuario);
         return { ok: true };
       },
@@ -364,10 +377,11 @@ useEffect(() => {
           return { ok: false, error: 'No se encontró tu perfil. Contacta al administrador.' };
         }
         if (!perfil.activo) {
-          await supabase.auth.signOut();
-          return { ok: false, error: 'Tu cuenta está pendiente de aprobación por el administrador.' };
+          setCuentaPendiente(true);
+          return { ok: true, pendiente: true };
         }
         setUsuario(perfil.usuario);
+        setCuentaPendiente(false);
         await guardarSesion(perfil.usuario);
         return { ok: true };
       },
@@ -383,6 +397,7 @@ useEffect(() => {
 
       cerrarSesion: async () => {
         setUsuario(null);
+        setCuentaPendiente(false);
         await borrarSesionGuardada();
         if (supabaseConfigurado) await supabase.auth.signOut();
       },
@@ -390,11 +405,21 @@ useEffect(() => {
       restaurarSesionGuardada: async () => {
         const guardado = await leerSesionGuardada();
         if (!guardado) return false;
+        if (supabaseConfigurado) {
+          // SecureStore no es una credencial: debe existir un JWT válido y MFA.
+          const { data: auth, error } = await supabase.auth.getUser();
+          if (error || !auth.user || auth.user.id !== guardado.id || await faltaSegundoFactor()) return false;
+          const perfil = await cargarPerfilDesdeDB(auth.user.id);
+          if (!perfil?.activo) return false;
+          setUsuario(perfil.usuario);
+          setCuentaPendiente(false);
+          return true;
+        }
         setUsuario(guardado);
         return true;
       },
     }),
-    [usuario, cargando],
+    [usuario, cuentaPendiente, cargando],
   );
 
   // El View raíz solo OBSERVA los toques (devuelve false: no se los roba)

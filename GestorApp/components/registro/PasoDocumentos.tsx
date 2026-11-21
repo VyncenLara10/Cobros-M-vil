@@ -4,10 +4,11 @@ import { Colors, Spacing, Typography } from '@/constants/DesignTokens';
 import { StyleSheet, Text, View } from 'react-native';
 
 interface PasoDocumentosProps {
+  datos: DatosRegistro;
   onCambiarCampo: <K extends keyof DatosRegistro>(campo: K, valor: DatosRegistro[K]) => void;
 }
 
-export default function PasoDocumentos({ onCambiarCampo }: PasoDocumentosProps) {
+export default function PasoDocumentos({ datos, onCambiarCampo }: PasoDocumentosProps) {
   return (
     <View>
       <Text style={styles.titulo}>Documentos de identidad</Text>
@@ -18,18 +19,21 @@ export default function PasoDocumentos({ onCambiarCampo }: PasoDocumentosProps) 
 
       <DocumentUploader
         titulo="DPI - frente"
+        value={datos.dpiFrenteUri}
         obligatorio
         onChange={(uri) => onCambiarCampo('dpiFrenteUri', uri)}
       />
 
       <DocumentUploader
         titulo="DPI - reverso"
+        value={datos.dpiReversoUri}
         obligatorio
         onChange={(uri) => onCambiarCampo('dpiReversoUri', uri)}
       />
 
       <DocumentUploader
         titulo="Antecedentes penales y policiacos"
+        value={datos.antecedentesPenalesUri}
         descripcion="Constancia vigente, no mayor a 3 meses"
         obligatorio
         onChange={(uri) => onCambiarCampo('antecedentesPenalesUri', uri)}

@@ -106,7 +106,7 @@ begin
     rid := net.http_post(
       url := 'https://exp.host/--/api/v2/push/send',
       headers := jsonb_build_object('Content-Type', 'application/json', 'Accept', 'application/json'),
-      body := jsonb_build_object('messages', msgs),
+      body := msgs,
       timeout_milliseconds := 10000
     );
     update public.push_outbox
@@ -140,9 +140,9 @@ declare
   elem jsonb;
 begin
   for r in
-    select o.id, o.orden, resp.content
+    select o.id, o.orden, resp.content::jsonb as content
     from public.push_outbox o
-    join net._http_response resp on resp.request_id = o.request_id
+    join net._http_response resp on resp.id = o.request_id
     where o.estado = 'enviado' and o.request_id is not null
   loop
     -- Expo responde los tickets en el MISMO orden del batch.
@@ -213,7 +213,7 @@ begin
     rid := net.http_post(
       url := 'https://exp.host/--/api/v2/push/send',
       headers := jsonb_build_object('Content-Type', 'application/json', 'Accept', 'application/json'),
-      body := jsonb_build_object('messages', msgs),
+      body := msgs,
       timeout_milliseconds := 10000
     );
     update public.push_outbox
@@ -264,7 +264,11 @@ begin
     );
     update public.push_outbox
     set recibo_request_id = rid, actualizado_en = now()
-    where estado = 'ticket_ok' and recibo_request_id is null;
+    where ticket_id in (
+      select ticket_id from public.push_outbox
+      where estado='ticket_ok' and ticket_id is not null and recibo_request_id is null
+      order by actualizado_en limit 200
+    ) and estado='ticket_ok' and recibo_request_id is null;
   exception when others then
     raise warning '[push] no se pudieron pedir recibos: %', sqlerrm;
   end;
@@ -283,9 +287,9 @@ declare
   par jsonb;
 begin
   for r in
-    select o.id, o.ticket_id, resp.content
+    select o.id, o.ticket_id, resp.content::jsonb as content
     from public.push_outbox o
-    join net._http_response resp on resp.request_id = o.recibo_request_id
+    join net._http_response resp on resp.id = o.recibo_request_id
     where o.estado = 'ticket_ok' and o.recibo_request_id is not null and o.ticket_id is not null
   loop
     -- getReceipts responde un mapa {ticketId: {status, details}}.
@@ -326,6 +330,17 @@ begin
 exception when others then
   raise warning 'No se pudo agendar el cron de push (%). Activa la extensión pg_cron y vuelve a ejecutar este bloque.', sqlerrm;
 end $$;
+
+-- La outbox contiene Expo Push Tokens y datos de entrega, por lo que
+-- solamente debe consultarla el administrador desde SQL Editor.
+-- El scheduler de pg_cron ejecuta las funciones como el dueño del job.
+revoke all on table public.push_outbox from public, anon, authenticated;
+revoke execute on function public.push_disparar() from public, anon, authenticated;
+revoke execute on function public.push_procesar_respuestas() from public, anon, authenticated;
+revoke execute on function public.push_reintentar() from public, anon, authenticated;
+revoke execute on function public.push_pedir_recibos() from public, anon, authenticated;
+revoke execute on function public.push_procesar_recibos() from public, anon, authenticated;
+revoke execute on function public.push_tick() from public, anon, authenticated;
 
 -- ============================================================================
 -- PRUEBA MANUAL (SQL Editor):

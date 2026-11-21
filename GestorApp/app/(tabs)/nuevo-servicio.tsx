@@ -1,10 +1,12 @@
 import FormInput from '@/components/(auth)/FormInput';
 import PrimaryButton from '@/components/(auth)/PrimaryButton';
+import SelectorPunto, { Coordenada } from '@/components/mapa/SelectorPunto';
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import { buscarClienteDB, ClienteBusqueda, crearServicio } from '@/domain/servicios/servicios';
 import { useBottomInset } from '@/hooks/useBottomInset';
 import { ROL_LABEL, ROLES_ELEGIBLES, SubtipoVerificacion, TipoServicio } from '@/types';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import * as Location from 'expo-location';
 import { useState } from 'react';
 import {
@@ -43,6 +45,13 @@ const datosVacios: DatosCliente = {
   clienteId: '', nombre: '', apellido: '', dpi: '', telefono: '',
   direccion: '', colonia: '', municipio: '', referencia: '', monto_deuda: '', notas: '',
 };
+
+function leerCoordenada(texto: string, minimo: number, maximo: number): number | null {
+  const limpio = texto.trim().replace(',', '.');
+  if (!/^-?(?:\\d+|\\d*\\.\\d+)$/.test(limpio)) return null;
+  const num = Number(limpio);
+  return Number.isFinite(num) && num >= minimo && num <= maximo ? num : null;
+}
 
 // ─── Configuración de tipos de servicio (con reglas de rol) ─────────────────
 
@@ -254,16 +263,49 @@ export default function NuevoServicioScreen() {
   const [datos, setDatos] = useState<DatosCliente>(datosVacios);
   const [errores, setErrores] = useState<Partial<DatosCliente>>({});
   const [enviando, setEnviando] = useState(false);
+  const [servicioPublicadoId, setServicioPublicadoId] = useState<string | null>(null);
+  const [advertenciaPublicacion, setAdvertenciaPublicacion] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalBuscar, setModalBuscar] = useState(false);
   const [clienteVinculado, setClienteVinculado] = useState<ClienteBusqueda | null>(null);
   const [notif, setNotif] = useState<ReturnType<typeof generarNotificacion> | null>(null);
-  const [ubicacionActual, setUbicacionActual] = useState<{ lat: number; lng: number } | null>(null);
+  const [ubicacionActual, setUbicacionActual] = useState<Coordenada | null>(null);
+  const [latitudTexto, setLatitudTexto] = useState('');
+  const [longitudTexto, setLongitudTexto] = useState('');
+  const [errorCoordenadas, setErrorCoordenadas] = useState<string | null>(null);
+  const [selectorMapaVisible, setSelectorMapaVisible] = useState(false);
   const [obteniendoUbicacion, setObteniendoUbicacion] = useState(false);
 
   const cambiarCampo = (campo: keyof DatosCliente, valor: string) => {
     setDatos((prev) => ({ ...prev, [campo]: valor }));
     if (errores[campo]) setErrores((prev) => ({ ...prev, [campo]: undefined }));
+  };
+
+  // El mapa y los campos manuales actualizan la MISMA coordenada. No hacemos
+  // ninguna llamada a Places/Geocoding/Routes: es el punto dado por el admin.
+  const fijarPunto = (punto: Coordenada) => {
+    setUbicacionActual(punto);
+    setLatitudTexto(punto.lat.toFixed(6));
+    setLongitudTexto(punto.lng.toFixed(6));
+    setErrorCoordenadas(null);
+  };
+
+  const escribirCoordenadas = (campo: 'lat' | 'lng', texto: string) => {
+    const latTexto = campo === 'lat' ? texto : latitudTexto;
+    const lngTexto = campo === 'lng' ? texto : longitudTexto;
+    if (campo === 'lat') setLatitudTexto(texto);
+    else setLongitudTexto(texto);
+    const lat = leerCoordenada(latTexto, -90, 90);
+    const lng = leerCoordenada(lngTexto, -180, 180);
+    setUbicacionActual(lat != null && lng != null ? { lat, lng } : null);
+    setErrorCoordenadas(null);
+  };
+
+  const limpiarPunto = () => {
+    setUbicacionActual(null);
+    setLatitudTexto('');
+    setLongitudTexto('');
+    setErrorCoordenadas(null);
   };
 
   const toggleSubtipo = (s: SubtipoVerificacion) => {
@@ -291,12 +333,20 @@ export default function NuevoServicioScreen() {
       monto_deuda: c.deudaTotal ? String(c.deudaTotal) : '',
       notas: '',
     });
+    if (c.lat != null && c.lng != null &&
+        leerCoordenada(String(c.lat), -90, 90) != null &&
+        leerCoordenada(String(c.lng), -180, 180) != null) {
+      fijarPunto({ lat: c.lat, lng: c.lng });
+    } else {
+      limpiarPunto();
+    }
     setModalBuscar(false);
   };
 
   const desvincularCliente = () => {
     setClienteVinculado(null);
     setDatos(datosVacios);
+    limpiarPunto();
   };
 
   const usarMiUbicacion = async () => {
@@ -308,7 +358,7 @@ export default function NuevoServicioScreen() {
         return;
       }
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setUbicacionActual({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      fijarPunto({ lat: pos.coords.latitude, lng: pos.coords.longitude });
     } catch {
       Alert.alert('No se pudo obtener tu ubicación', 'Verifica que el GPS esté activado e intenta de nuevo.');
     } finally {
@@ -327,7 +377,14 @@ export default function NuevoServicioScreen() {
   };
 
   const simularEnvio = async () => {
-    if (!validarCliente() || !tipoSeleccionado) return;
+    if (enviando || !validarCliente() || !tipoSeleccionado) return;
+    if (latitudTexto.trim() || longitudTexto.trim()) {
+      if (!ubicacionActual) {
+        setErrorCoordenadas('Ingresa ambas coordenadas válidas: latitud de -90 a 90 y longitud de -180 a 180.');
+        Alert.alert('Coordenadas inválidas', 'Revisa latitud y longitud, o borra ambas para continuar sin punto GPS.');
+        return;
+      }
+    }
     setEnviando(true);
     const tipoLegalInfo = GESTIONES_LEGALES.find((g) => g.id === tipoLegal);
     const resultado = await crearServicio({
@@ -356,6 +413,8 @@ export default function NuevoServicioScreen() {
       Alert.alert('No se pudo publicar la solicitud', resultado.error ?? 'Intenta de nuevo.');
       return;
     }
+    setServicioPublicadoId(resultado.id ?? null);
+    setAdvertenciaPublicacion(resultado.advertencia ?? null);
     setNotif(generarNotificacion(tipoSeleccionado, datos, {
       tipoLegal: tipoLegal ?? undefined,
       comisionPct,
@@ -373,9 +432,11 @@ export default function NuevoServicioScreen() {
     setComisionPctInput('15');
     setDatos(datosVacios);
     setClienteVinculado(null);
-    setUbicacionActual(null);
+    limpiarPunto();
     setErrores({});
     setNotif(null);
+    setServicioPublicadoId(null);
+    setAdvertenciaPublicacion(null);
   };
 
   // ── Paso 1: tipo ────────────────────────────────────────────────────────
@@ -543,6 +604,30 @@ export default function NuevoServicioScreen() {
         </View>
         <FormInput label="Referencia de ubicación" placeholder='Casa azul con portón negro, frente a la tienda "La Fe"' value={datos.referencia} onChangeText={(t) => cambiarCampo('referencia', t)} />
 
+        <Text style={styles.coordenadasAyuda}>
+          Puedes pegar coordenadas de Google Maps, por ejemplo: latitud 14.834000 y longitud -91.518000. Valen para cobros, notificaciones, verificaciones y gestiones legales.
+        </Text>
+        <View style={styles.row}>
+          <View style={styles.rowHalf}>
+            <FormInput label="Latitud" placeholder="14.834000" value={latitudTexto}
+              onChangeText={(t) => escribirCoordenadas('lat', t)} keyboardType="default" />
+          </View>
+          <View style={styles.rowHalf}>
+            <FormInput label="Longitud" placeholder="-91.518000" value={longitudTexto}
+              onChangeText={(t) => escribirCoordenadas('lng', t)} keyboardType="default" />
+          </View>
+        </View>
+        {errorCoordenadas && <Text style={styles.errorCoordenadas}>{errorCoordenadas}</Text>}
+        {ubicacionActual && (
+          <Text style={styles.coordenadasConfirmadas}>
+            ✓ Destino: {ubicacionActual.lat.toFixed(6)}, {ubicacionActual.lng.toFixed(6)}
+          </Text>
+        )}
+        <Pressable style={styles.buscarClienteBtn} onPress={() => setSelectorMapaVisible(true)}>
+          <Ionicons name="map-outline" size={18} color={Colors.primary} />
+          <Text style={styles.buscarClienteText}>Fijar ubicación tocando el mapa</Text>
+          <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+        </Pressable>
         <Pressable style={styles.buscarClienteBtn} onPress={usarMiUbicacion} disabled={obteniendoUbicacion}>
           {obteniendoUbicacion ? (
             <ActivityIndicator color={Colors.primary} size="small" />
@@ -553,6 +638,12 @@ export default function NuevoServicioScreen() {
             {obteniendoUbicacion ? 'Obteniendo ubicación…' : ubicacionActual ? 'Ubicación del cliente capturada' : 'Usar mi ubicación actual (si estás en el sitio)'}
           </Text>
         </Pressable>
+
+        {(latitudTexto || longitudTexto) && (
+          <Pressable onPress={limpiarPunto} style={{ marginBottom: Spacing.md }}>
+            <Text style={{ color: Colors.danger, fontWeight: '600' }}>Quitar punto GPS</Text>
+          </Pressable>
+        )}
 
         {tipoSeleccionado === 'cobro' && (
           <>
@@ -616,6 +707,25 @@ export default function NuevoServicioScreen() {
       {/* Modal buscador */}
       <ModalBuscarCliente visible={modalBuscar} onCerrar={() => setModalBuscar(false)} onSeleccionar={vincularCliente} />
 
+      {/* Selección manual de destino: tocar un punto no consume Geocoding/Routes/Places. */}
+      <Modal visible={selectorMapaVisible} animationType="slide" transparent
+        onRequestClose={() => setSelectorMapaVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.subtipoTitle}>UBICACIÓN DEL SERVICIO</Text>
+            <Text style={styles.buscarSub}>Toca el lugar exacto. El marcador será el destino de la visita.</Text>
+            <SelectorPunto valor={ubicacionActual} onCambiar={fijarPunto} alto={315} />
+            <Text style={styles.coordenadasConfirmadas}>
+              {ubicacionActual
+                ? `${ubicacionActual.lat.toFixed(6)}, ${ubicacionActual.lng.toFixed(6)}`
+                : 'Toca el mapa para marcar el destino'}
+            </Text>
+            <PrimaryButton label="Confirmar punto" onPress={() => setSelectorMapaVisible(false)}
+              style={{ marginTop: Spacing.md }} />
+          </View>
+        </View>
+      </Modal>
+
       {/* Modal confirmación */}
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -644,8 +754,19 @@ export default function NuevoServicioScreen() {
               ))}
 
               <View style={styles.modalDivider} />
-              <Text style={styles.modalExito}>✅ Solicitud publicada. El sistema buscará gestores elegibles en la zona.</Text>
+              <Text style={styles.modalExito}>✅ Servicio guardado en la base de datos. Los gestores elegibles podrán consultarlo.</Text>
+              {advertenciaPublicacion ? (
+                <Text style={[styles.modalMensaje, { color: Colors.danger, marginTop: 10 }]}>
+                  Atención: {advertenciaPublicacion}
+                </Text>
+              ) : null}
 
+              {servicioPublicadoId ? (
+                <PrimaryButton label="Abrir servicio creado" onPress={() => {
+                  setModalVisible(false);
+                  router.push(`/servicio/${servicioPublicadoId}`);
+                }} style={{ marginTop: Spacing.lg }} />
+              ) : null}
               <PrimaryButton label="Crear otra solicitud" onPress={reiniciar} style={{ marginTop: Spacing.lg }} />
               <Pressable onPress={() => setModalVisible(false)} style={styles.modalVerDetalle}>
                 <Text style={styles.modalVerDetalleText}>Cerrar</Text>
@@ -736,6 +857,9 @@ const styles = StyleSheet.create({
   vinculadoQuitar: { ...Typography.caption, color: Colors.danger, fontWeight: '700' },
 
   sectionLabel: { ...Typography.micro, color: Colors.textMuted, letterSpacing: 0.8, marginBottom: Spacing.sm },
+  coordenadasAyuda: { ...Typography.caption, color: Colors.textSecondary, marginBottom: Spacing.md, lineHeight: 19 },
+  coordenadasConfirmadas: { ...Typography.caption, color: Colors.success, fontWeight: '600', marginBottom: Spacing.sm },
+  errorCoordenadas: { ...Typography.caption, color: Colors.danger, marginBottom: Spacing.md },
   row: { flexDirection: 'row', gap: Spacing.sm },
   rowHalf: { flex: 1 },
   comisionPreview: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, backgroundColor: Colors.infoMuted, borderRadius: Radius.sm, padding: Spacing.sm, marginTop: -Spacing.sm, marginBottom: Spacing.md },

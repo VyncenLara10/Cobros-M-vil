@@ -7,6 +7,7 @@
 
 import { Colors, Radius, Spacing, Typography } from '@/constants/DesignTokens';
 import { useSesion } from '@/domain/auth/sesion';
+import { servicioPorId } from '@/domain/servicios/servicios';
 import {
     cargarNotificaciones,
     marcarTodasLeidas,
@@ -15,7 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const ICONO_TIPO: Record<string, string> = {
   servicio_nuevo: 'briefcase-outline',
@@ -27,6 +28,7 @@ export default function NotificacionesScreen() {
   const { usuario } = useSesion();
   const [notifs, setNotifs] = useState<NotificacionApp[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [abriendoId, setAbriendoId] = useState<string | null>(null);
 
   // Callback ESTABLE (deps []): un callback que cambia en cada render con
   // useFocusEffect provoca un bucle infinito (ver HISTORIAL, fix Mi perfil).
@@ -47,9 +49,27 @@ export default function NotificacionesScreen() {
     }, []),
   );
 
-  const abrir = (n: NotificacionApp) => {
-    if (n.tipo === 'servicio_nuevo' && n.referenciaId) {
+  const abrir = async (n: NotificacionApp) => {
+    if (n.tipo !== 'servicio_nuevo') return;
+    if (!n.referenciaId) {
+      Alert.alert('Aviso sin servicio', 'Esta notificación no tiene un servicio asociado.');
+      return;
+    }
+    if (abriendoId) return;
+    setAbriendoId(n.id);
+    try {
+      const servicio = await servicioPorId(n.referenciaId);
+      if (!servicio) {
+        Alert.alert('Servicio no disponible',
+          'No se encontró este servicio o ya no tienes permiso para verlo. Actualiza tu lista.');
+        return;
+      }
       router.push(`/servicio/${n.referenciaId}`);
+    } catch (error) {
+      Alert.alert('No se pudo abrir el servicio',
+        error instanceof Error ? error.message : 'Verifica tu conexión.');
+    } finally {
+      setAbriendoId(null);
     }
   };
 
@@ -76,7 +96,7 @@ export default function NotificacionesScreen() {
         </View>
       ) : (
         notifs.map((n) => (
-          <Pressable key={n.id} style={[styles.card, !n.leida && styles.cardNoLeida]} onPress={() => abrir(n)}>
+          <Pressable key={n.id} disabled={!!abriendoId} style={[styles.card, !n.leida && styles.cardNoLeida]} onPress={() => void abrir(n)}>
             <View style={[styles.iconoCaja, !n.leida && { backgroundColor: Colors.primaryMuted }]}>
               <Ionicons
                 name={(ICONO_TIPO[n.tipo] ?? 'notifications-outline') as any}
@@ -89,7 +109,7 @@ export default function NotificacionesScreen() {
               <Text style={styles.cardCuerpo}>{n.cuerpo}</Text>
               <Text style={styles.cardFecha}>{n.fecha}</Text>
             </View>
-            {!n.leida && <View style={styles.puntoLeida} />}
+            {abriendoId === n.id ? <ActivityIndicator color={Colors.primary} /> : !n.leida && <View style={styles.puntoLeida} />}
           </Pressable>
         ))
       )}

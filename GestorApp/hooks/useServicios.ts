@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 interface EstadoLista {
   servicios: Servicio[];
   cargando: boolean;
+  error: string | null;
   refrescar: () => void;
 }
 
@@ -38,15 +39,18 @@ async function posicionConCache(): Promise<Posicion> {
 function useCargaServicios(cargar: () => Promise<Servicio[]>, deps: any[]): EstadoLista {
   const [servicios, setServicios] = useState<Servicio[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let cancelado = false;
     setCargando(true);
+    setError(null);
     cargar()
       .then((data) => {
         if (!cancelado) {
           setServicios(data);
+          setError(null);
           setCargando(false);
         }
       })
@@ -57,6 +61,7 @@ function useCargaServicios(cargar: () => Promise<Servicio[]>, deps: any[]): Esta
         console.warn('[servicios] error cargando lista', e);
         if (!cancelado) {
           setServicios([]);
+          setError(e instanceof Error ? e.message : 'Error inesperado al consultar servicios.');
           setCargando(false);
         }
       });
@@ -70,7 +75,7 @@ function useCargaServicios(cargar: () => Promise<Servicio[]>, deps: any[]): Esta
   // si se recreara en cada render provocaría un bucle infinito de re-render
   // (crash: "Maximum update depth exceeded").
   const refrescar = useCallback(() => setTick((t) => t + 1), []);
-  return { servicios, cargando, refrescar };
+  return { servicios, cargando, error, refrescar };
 }
 
 /** Solicitudes pendientes elegibles para el rol del gestor, ordenadas por cercanía. */
@@ -131,6 +136,7 @@ export function useServiciosVisibles(usuario: { id: string; rol: RolApp; zona?: 
 export function useServicio(id: string | undefined) {
   const [servicio, setServicio] = useState<Servicio | undefined>(undefined);
   const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -141,10 +147,12 @@ export function useServicio(id: string | undefined) {
       return;
     }
     setCargando(true);
+    setError(null);
     ServiciosDB.servicioPorId(id)
       .then((data) => {
         if (!cancelado) {
           setServicio(data);
+          setError(null);
           setCargando(false);
         }
       })
@@ -154,6 +162,7 @@ export function useServicio(id: string | undefined) {
         console.warn('[servicios] error cargando servicio', id, e);
         if (!cancelado) {
           setServicio(undefined);
+          setError(e instanceof Error ? e.message : 'No se pudo cargar el detalle.');
           setCargando(false);
         }
       });
@@ -163,7 +172,7 @@ export function useServicio(id: string | undefined) {
   }, [id, tick]);
 
   const refrescar = useCallback(() => setTick((t) => t + 1), []);
-  return { servicio, cargando, refrescar };
+  return { servicio, cargando, error, refrescar };
 }
 
 /**
@@ -190,7 +199,7 @@ export function useServiciosEnTiempoReal(
       `servicios-${usuario.id}`,
       { event: 'INSERT', schema: 'public', table: 'servicios' },
       (payload) => {
-        const fila = payload.new as { estado?: string; tipo?: string } | null;
+        const fila = payload.new as { id?: string; estado?: string; tipo?: string } | null;
         if (
           fila?.estado === 'pendiente' &&
           fila.tipo &&
@@ -199,6 +208,7 @@ export function useServiciosEnTiempoReal(
           notificarLocal(
             '📋 Nuevo servicio disponible',
             `Hay un nuevo servicio de ${TIPO_SERVICIO_LABEL[fila.tipo as keyof typeof TIPO_SERVICIO_LABEL]} para tu rol.`,
+            fila.id ? { tipo: 'servicio_nuevo', referencia_id: fila.id } : undefined,
           );
           callbackRef.current();
         }

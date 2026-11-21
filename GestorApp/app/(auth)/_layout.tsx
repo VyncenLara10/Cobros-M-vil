@@ -6,6 +6,7 @@ export default function AuthLayout() {
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.background } }}>
       <Stack.Screen name="registro" />
       <Stack.Screen name="registro-enviado" />
+      <Stack.Screen name="confirmar-correo" />
     </Stack>
   );
 }

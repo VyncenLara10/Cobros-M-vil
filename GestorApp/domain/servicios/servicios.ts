@@ -35,7 +35,7 @@ import type { RolApp } from '@/domain/auth/sesion';
 // ─── Mapeo DB (snake_case, filas anidadas) → tipos de la app ────────────────
 
 const SELECT_SERVICIO =
-  '*, cliente:clientes(*, referencias:referencias_cliente(*)), creditos:creditos_cliente(*), intentos:intentos_servicio(*), gestor:perfiles(nombre)';
+  '*, cliente:clientes!servicios_cliente_id_fkey(*, referencias:referencias_cliente(*)), creditos:creditos_cliente(*), intentos:intentos_servicio(*), gestor:perfiles!servicios_gestor_id_fkey(nombre)';
 
 function formatearFecha(iso: string | null): string {
   if (!iso) return '';
@@ -115,7 +115,18 @@ function mapServicio(row: any): Servicio {
     id: row.id,
     tipo: row.tipo,
     estado: row.estado,
-    cliente: mapCliente(row.cliente),
+    // La RLS de clientes protege los datos personales antes de aceptar.
+    // El servicio sigue siendo visible; nunca mostrar una tarjeta sin título.
+    cliente: row.cliente ? mapCliente(row.cliente) : mapCliente({
+      nombre: row.estado === 'pendiente' && !row.gestor_id
+        ? 'Servicio pendiente de aceptar'
+        : 'Datos del cliente no accesibles',
+      direccion: row.estado === 'pendiente' && !row.gestor_id
+        ? 'Los detalles se desbloquean al aceptar'
+        : 'Consulta con administración',
+      zona: '',
+      municipio: '',
+    }),
     deudaTotal: Number(row.deuda_total ?? 0),
     montoGestion: Number(row.monto_gestion ?? 0),
     comisionPct: Number(row.comision_pct ?? 0),
@@ -225,8 +236,7 @@ export async function serviciosDisponiblesPara(
     .eq('estado', 'pendiente')
     .order('fecha_asignacion', { ascending: true });
   if (error) {
-    console.warn('[servicios] serviciosDisponiblesPara', error.message);
-    return [];
+    throw new Error('No se pudieron cargar los servicios (serviciosDisponiblesPara): ' + error.message);
   }
   const filtrados = (data ?? [])
     .filter((r: any) => rolPuedeAceptar(rol, r.tipo))
@@ -244,8 +254,7 @@ export async function serviciosDeGestor(gestorId: string): Promise<Servicio[]> {
     .eq('estado', 'activo')
     .order('fecha_asignacion', { ascending: true });
   if (error) {
-    console.warn('[servicios] serviciosDeGestor', error.message);
-    return [];
+    throw new Error('No se pudieron cargar los servicios (serviciosDeGestor): ' + error.message);
   }
   return (data ?? []).map(mapServicio);
 }
@@ -259,8 +268,7 @@ export async function serviciosDeGestorTodos(gestorId: string): Promise<Servicio
     .eq('gestor_id', gestorId)
     .order('fecha_asignacion', { ascending: false });
   if (error) {
-    console.warn('[servicios] serviciosDeGestorTodos', error.message);
-    return [];
+    throw new Error('No se pudieron cargar los servicios (serviciosDeGestorTodos): ' + error.message);
   }
   return (data ?? []).map(mapServicio);
 }
@@ -273,8 +281,7 @@ export async function serviciosTodos(): Promise<Servicio[]> {
     .select(SELECT_SERVICIO)
     .order('fecha_asignacion', { ascending: false });
   if (error) {
-    console.warn('[servicios] serviciosTodos', error.message);
-    return [];
+    throw new Error('No se pudieron cargar los servicios (serviciosTodos): ' + error.message);
   }
   return (data ?? []).map(mapServicio);
 }
@@ -308,7 +315,8 @@ export async function servicioPorId(id: string): Promise<Servicio | undefined> {
     return s ? { ...s } : undefined;
   }
   const { data, error } = await supabase.from('servicios').select(SELECT_SERVICIO).eq('id', id).maybeSingle();
-  if (error || !data) return undefined;
+  if (error) throw new Error('No se pudo abrir el servicio: ' + error.message);
+  if (!data) return undefined;
   return mapServicio(data);
 }
 
@@ -323,6 +331,8 @@ export interface ClienteBusqueda {
   zona: string;
   dpi?: string;
   deudaTotal?: number;
+  lat?: number;
+  lng?: number;
 }
 
 function mapClienteMock(c: ClienteDB): ClienteBusqueda {
@@ -345,7 +355,7 @@ export async function buscarClienteDB(query: string): Promise<ClienteBusqueda[]>
 
   const { data, error } = await supabase
     .from('clientes')
-    .select('id, nombre, telefono, direccion, municipio, zona, dpi')
+    .select('id, nombre, telefono, direccion, municipio, zona, dpi, lat, lng')
     .or(`nombre.ilike.%${q}%,dpi.ilike.%${q}%`)
     .limit(20);
   if (error) {
@@ -360,6 +370,8 @@ export async function buscarClienteDB(query: string): Promise<ClienteBusqueda[]>
     municipio: c.municipio ?? '',
     zona: c.zona ?? '',
     dpi: c.dpi ?? undefined,
+    lat: c.lat != null ? Number(c.lat) : undefined,
+    lng: c.lng != null ? Number(c.lng) : undefined,
   }));
 }
 
@@ -387,10 +399,18 @@ export interface NuevoServicioInput {
   ubicacion?: { lat: number; lng: number };
 }
 
-export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: boolean; error?: string }> {
-  if (!supabaseConfigurado) return { ok: true }; // modo demo: nada que persistir
+export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: boolean; id?: string; error?: string; advertencia?: string }> {
+  if (!supabaseConfigurado) return { ok: false, error: 'No está configurado Supabase. No se creó ningún servicio.' };
 
   try {
+    // Validar también en la capa de datos, no solo en el formulario.
+    // No geocodificamos ni consultamos direcciones externas.
+    const punto = input.ubicacion;
+    if (punto && (!Number.isFinite(punto.lat) || !Number.isFinite(punto.lng) ||
+      punto.lat < -90 || punto.lat > 90 || punto.lng < -180 || punto.lng > 180)) {
+      return { ok: false, error: 'Coordenadas fuera del rango permitido.' };
+    }
+    const advertencias: string[] = [];
     let clienteId = input.cliente.clienteId;
 
     if (!clienteId) {
@@ -412,10 +432,18 @@ export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: bo
       if (errCli || !cli) return { ok: false, error: errCli?.message ?? 'No se pudo crear el cliente' };
       clienteId = cli.id;
     } else if (input.ubicacion) {
-      await supabase
+      // Antes se ignoraba un UPDATE rechazado por RLS; eso hacía creer que
+      // un punto había quedado guardado cuando realmente no fue así.
+      const { data: actualizado, error: errorUbicacion } = await supabase
         .from('clientes')
         .update({ lat: input.ubicacion.lat, lng: input.ubicacion.lng })
-        .eq('id', clienteId);
+        .eq('id', clienteId)
+        .select('id')
+        .maybeSingle();
+      if (errorUbicacion || !actualizado) {
+        return { ok: false, error: 'No se pudo guardar la ubicación del cliente vinculado: ' +
+          (errorUbicacion?.message ?? 'Sin permisos para modificar ese cliente.') };
+      }
     }
 
     const deudaTotal = input.deudaTotal ?? 0;
@@ -450,7 +478,10 @@ export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: bo
         saldo_real: deudaTotal,
         porcentaje_comision: comisionPct,
       });
-      if (errCred) console.warn('[servicios] crearServicio creditos_cliente', errCred.message);
+      if (errCred) {
+        console.warn('[servicios] crearServicio creditos_cliente', errCred.message);
+        advertencias.push('Servicio creado, pero no se guardó el crédito: ' + errCred.message);
+      }
     }
 
     // Notificación broadcast: una fila por rol elegible, para que el canal
@@ -466,9 +497,12 @@ export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: bo
       referencia_id: svc.id,
     }));
     const { error: errNotif } = await supabase.from('notificaciones').insert(filasNotif);
-    if (errNotif) console.warn('[servicios] crearServicio notificaciones', errNotif.message);
+    if (errNotif) {
+      console.warn('[servicios] crearServicio notificaciones', errNotif.message);
+      advertencias.push('Servicio creado, pero fallaron los avisos: ' + errNotif.message);
+    }
 
-    return { ok: true };
+    return { ok: true, id: svc.id, advertencia: advertencias.join('\n') || undefined };
   } catch (e: any) {
     return { ok: false, error: e?.message ?? 'Error de conexión con la base de datos' };
   }
@@ -507,9 +541,10 @@ export async function cargarStatsGestor(perfilId: string): Promise<StatsGestor |
 /** Activa/desactiva la disponibilidad del gestor (aparece en el tab Gestores del admin). */
 export async function actualizarDisponibilidad(perfilId: string, disponible: boolean): Promise<void> {
   if (!supabaseConfigurado) return;
-  const { error } = await supabase
-    .from('gestores_stats')
-    .upsert({ perfil_id: perfilId, disponible }, { onConflict: 'perfil_id' });
+  // El servidor usa auth.uid(): no acepta que un gestor cambie a otro.
+  const { error } = await supabase.rpc('cambiar_mi_disponibilidad', {
+    p_disponible: disponible,
+  });
   if (error) console.warn('[servicios] actualizarDisponibilidad', error.message);
 }
 
@@ -662,18 +697,8 @@ export async function escalarALegal(servicioId: string): Promise<{ ok: boolean; 
 
   registrarEvento(servicioId, 'escalado_legal');
 
-  // Broadcast a los abogados (RLS: "staff crea notificaciones" con check true).
-  const nombreCliente =
-    (actual?.cliente as { nombre?: string } | null)?.nombre?.trim() || 'un cliente';
-  const { error: errNotif } = await supabase.from('notificaciones').insert({
-    perfil_id: null,
-    rol_destino: 'abogado',
-    titulo: '⚖️ Caso escalado a legal',
-    cuerpo: `${nombreCliente}: un gestor escaló este caso a gestión legal. Ábrelo desde la pestaña Legal para tomarlo.`,
-    tipo: 'servicio_escalado',
-    referencia_id: servicioId,
-  });
-  if (errNotif) console.warn('[servicios] escalarALegal notificación', errNotif.message);
+  // El trigger SQL avisar_escalado_legal publica la oferta en servidor.
+  // El cliente nunca necesita permiso para escribir notificaciones ajenas.
 
   return { ok: true };
 }
@@ -686,10 +711,7 @@ export async function serviciosEscaladosPor(gestorId: string): Promise<Servicio[
     .select(SELECT_SERVICIO)
     .eq('escalado_por', gestorId)
     .order('fecha_asignacion', { ascending: false });
-  if (error) {
-    console.warn('[servicios] serviciosEscaladosPor', error.message);
-    return [];
-  }
+  if (error) throw new Error('No se pudieron cargar los casos escalados: ' + error.message);
   return (data ?? []).map(mapServicio);
 }
 
@@ -703,9 +725,12 @@ export async function marcarEnSitio(servicioId: string): Promise<void> {
     Mocks.marcarEnSitio(servicioId);
     return;
   }
-  const { error } = await supabase.from('servicios').update({ fase: 'en_sitio' }).eq('id', servicioId);
-  if (error) console.warn('[servicios] marcarEnSitio', error.message);
-  else registrarEvento(servicioId, 'en_sitio');
+  const { data, error } = await supabase.from('servicios')
+    .update({ fase: 'en_sitio' }).eq('id', servicioId)
+    .eq('estado', 'activo').select('id').maybeSingle();
+  if (error) throw new Error('No se pudo registrar la llegada: ' + error.message);
+  if (!data) throw new Error('No tienes un servicio activo asignado para confirmar la llegada.');
+  registrarEvento(servicioId, 'en_sitio');
 }
 
 function patchCliente(cambios?: Partial<Cliente>): Record<string, any> {
@@ -733,12 +758,14 @@ export async function completarServicio(
   const notaGestor = extra?.notaGestor?.trim();
   const notasFinal = notaGestor ? (servicio.notas ? `${servicio.notas}\n— ${notaGestor}` : notaGestor) : servicio.notas;
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('servicios')
     .update({ estado: estadoFinal, fase: null, notas: notasFinal })
-    .eq('id', servicio.id);
-  if (error) console.warn('[servicios] completarServicio', error.message);
-  else registrarEvento(servicio.id, estadoFinal);
+    .eq('id', servicio.id).eq('estado', 'activo')
+    .select('id').maybeSingle();
+  if (error) throw new Error('No se pudo completar el servicio: ' + error.message);
+  if (!data) throw new Error('No se actualizó ningún servicio. Comprueba la asignación y el estado.');
+  registrarEvento(servicio.id, estadoFinal);
 
   const patch = patchCliente(extra?.clienteActualizado);
   if (Object.keys(patch).length > 0 && servicio.cliente.clienteId) {
@@ -767,9 +794,12 @@ export async function marcarEnSitioParte(servicio: Servicio, sub: SubtipoVerific
   }
   const actual = servicio.partesEstado ?? {};
   const nuevo = { ...actual, [sub]: { ...(actual[sub] ?? { enSitio: false, completado: false }), enSitio: true } };
-  const { error } = await supabase.from('servicios').update({ partes_estado: nuevo }).eq('id', servicio.id);
-  if (error) console.warn('[servicios] marcarEnSitioParte', error.message);
-  else registrarEvento(servicio.id, 'en_sitio');
+  const { data, error } = await supabase.from('servicios')
+    .update({ partes_estado: nuevo }).eq('id', servicio.id)
+    .eq('estado', 'activo').select('id').maybeSingle();
+  if (error) throw new Error('No se pudo confirmar la llegada: ' + error.message);
+  if (!data) throw new Error('No se actualizó la verificación. Comprueba que siga asignada a ti.');
+  registrarEvento(servicio.id, 'en_sitio');
 }
 
 export async function completarParte(
@@ -801,9 +831,12 @@ export async function completarParte(
     patchServicio.fase = 'en_sitio';
   }
 
-  const { error } = await supabase.from('servicios').update(patchServicio).eq('id', servicio.id);
-  if (error) console.warn('[servicios] completarParte', error.message);
-  else if (completoTodo) registrarEvento(servicio.id, 'completado');
+  const { data, error } = await supabase.from('servicios')
+    .update(patchServicio).eq('id', servicio.id).eq('estado', 'activo')
+    .select('id').maybeSingle();
+  if (error) throw new Error('No se pudo guardar la verificación: ' + error.message);
+  if (!data) throw new Error('No se guardó ninguna verificación. Comprueba que el caso siga activo y asignado.');
+  if (completoTodo) registrarEvento(servicio.id, 'completado');
 
   const patch = patchCliente(extra?.clienteActualizado);
   if (Object.keys(patch).length > 0 && servicio.cliente.clienteId) {

@@ -1,5 +1,4 @@
 import { Colors as COLORS, Radius as RADIUS, Spacing as SPACING } from '@/constants/DesignTokens';
-import { useSesion } from '@/domain/auth/sesion';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Servicio } from '../types';
 import { BadgeEstado, BadgeTipo } from './UI';
@@ -13,20 +12,16 @@ interface Props {
 }
 
 export default function ServiceCard({ servicio, onPress, onAceptar, aceptando }: Props) {
-  const { usuario } = useSesion();
   const formatMonto = (n: number) =>
     n > 0 ? `Q ${n.toLocaleString('es-GT')}` : '—';
 
   const esPendiente = servicio.estado === 'pendiente' && servicio.gestorId == null;
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => onPress(servicio.id)}
-      activeOpacity={0.75}>
-      {/* Header (el ID interno solo lo ve el admin) */}
+    <View style={styles.card}>
+      <TouchableOpacity onPress={() => onPress(servicio.id)} activeOpacity={0.75}>
+      {/* Tipo de servicio visible sin identificadores internos */}
       <View style={styles.cardTop}>
-        {usuario?.rol === 'admin' && <Text style={styles.cardId}>{servicio.id}</Text>}
         <BadgeTipo tipo={servicio.tipo} />
       </View>
 
@@ -66,6 +61,7 @@ export default function ServiceCard({ servicio, onPress, onAceptar, aceptando }:
         <Text style={styles.metaText}>👤 {servicio.gestorNombre}</Text>
       </View>
 
+      </TouchableOpacity>
       {/* Footer */}
       <View style={styles.footer}>
         <View>
@@ -96,7 +92,7 @@ export default function ServiceCard({ servicio, onPress, onAceptar, aceptando }:
           </View>
         )}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -114,11 +110,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: SPACING.sm,
-  },
-  cardId: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    fontFamily: 'monospace',
   },
   clientName: {
     fontSize: 15,

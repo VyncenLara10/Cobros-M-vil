@@ -39,43 +39,78 @@ function mapear(fila: any): NotificacionApp {
   };
 }
 
-/** Últimas notificaciones visibles para el usuario con sesión. */
+/** Recupera notificaciones visibles y sus lecturas privadas. */
 export async function cargarNotificaciones(): Promise<NotificacionApp[]> {
   if (!supabaseConfigurado) return [];
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return [];
   const { data, error } = await supabase
     .from('notificaciones')
-    .select('id, titulo, cuerpo, tipo, referencia_id, leida, enviada_en')
+    .select('id, perfil_id, titulo, cuerpo, tipo, referencia_id, leida, enviada_en')
     .order('enviada_en', { ascending: false })
-    .limit(100);
+    .limit(500);
   if (error) {
     console.warn('[notificaciones] cargar', error.message);
     return [];
   }
-  return (data ?? []).map(mapear);
-}
-
-/** Cuántas hay sin leer (para el punto rojo de la campana). */
-export async function contarNoLeidas(): Promise<number> {
-  if (!supabaseConfigurado) return 0;
-  const { count, error } = await supabase
-    .from('notificaciones')
-    .select('id', { count: 'exact', head: true })
-    .eq('leida', false);
-  if (error) {
-    console.warn('[notificaciones] contar', error.message);
-    return 0;
+  if (!data?.length) return [];
+  const ids = data.map((f) => f.id);
+  const { data: vistas, error: errorVistas } = await supabase
+    .from('notificaciones_vistas')
+    .select('notificacion_id')
+    .eq('perfil_id', auth.user.id)
+    .in('notificacion_id', ids);
+  if (errorVistas) {
+    console.warn('[notificaciones] lecturas', errorVistas.message);
+    // No mostrar como leídas ofertas cuya lectura no se pudo verificar.
   }
-  return count ?? 0;
+  const leidas = new Set((vistas ?? []).map((v) => v.notificacion_id));
+  const notificaciones = data.map((fila) => ({
+    ...mapear(fila),
+    leida: leidas.has(fila.id) || (fila.perfil_id !== null && !!fila.leida),
+  }));
+  // Un servicio nuevo crea una notificación por rol elegible. El admin puede
+  // ver las tres por RLS, pero son una sola oferta, no tres servicios.
+  const vistasServicios = new Set<string>();
+  return notificaciones.filter((n) => {
+    if (n.tipo !== 'servicio_nuevo' || !n.referenciaId) return true;
+    const llave = `${n.tipo}:${n.referenciaId}`;
+    if (vistasServicios.has(llave)) return false;
+    vistasServicios.add(llave);
+    return true;
+  });
 }
 
-/** Marca todas las visibles como leídas (RLS limita a las que puede ver). */
+/** Cuenta no leídas, independientemente de las lecturas de otros gestores. */
+export async function contarNoLeidas(): Promise<number> {
+  return (await cargarNotificaciones()).filter((f) => !f.leida).length;
+}
+
+/** Inserta exclusivamente marcadores propios, sin modificar notificaciones ajenas. */
 export async function marcarTodasLeidas(): Promise<void> {
   if (!supabaseConfigurado) return;
-  const { error } = await supabase
-    .from('notificaciones')
-    .update({ leida: true })
-    .eq('leida', false);
-  if (error) console.warn('[notificaciones] marcar', error.message);
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return;
+  const { data, error } = await supabase.from('notificaciones')
+    .select('id').order('enviada_en', { ascending: false }).limit(500);
+  if (error) {
+    console.warn('[notificaciones] cargar para marcar', error.message);
+    return;
+  }
+  if (!data?.length) return;
+  const filas = data.map((n) => ({ perfil_id: auth.user!.id, notificacion_id: n.id }));
+  // La PK descarta duplicados y RLS valida que el aviso sea visible.
+  for (let i = 0; i < filas.length; i += 100) {
+    const { error: errorInsert } = await supabase.from('notificaciones_vistas')
+      .upsert(filas.slice(i, i + 100), {
+        onConflict: 'perfil_id,notificacion_id',
+        ignoreDuplicates: true,
+      });
+    if (errorInsert) {
+      console.warn('[notificaciones] marcar', errorInsert.message);
+      return;
+    }
+  }
 }
 
 /**
