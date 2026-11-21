@@ -331,6 +331,17 @@ exception when others then
   raise warning 'No se pudo agendar el cron de push (%). Activa la extensión pg_cron y vuelve a ejecutar este bloque.', sqlerrm;
 end $$;
 
+-- La outbox contiene Expo Push Tokens y datos de entrega, por lo que
+-- solamente debe consultarla el administrador desde SQL Editor.
+-- El scheduler de pg_cron ejecuta las funciones como el dueño del job.
+revoke all on table public.push_outbox from public, anon, authenticated;
+revoke execute on function public.push_disparar() from public, anon, authenticated;
+revoke execute on function public.push_procesar_respuestas() from public, anon, authenticated;
+revoke execute on function public.push_reintentar() from public, anon, authenticated;
+revoke execute on function public.push_pedir_recibos() from public, anon, authenticated;
+revoke execute on function public.push_procesar_recibos() from public, anon, authenticated;
+revoke execute on function public.push_tick() from public, anon, authenticated;
+
 -- ============================================================================
 -- PRUEBA MANUAL (SQL Editor):
 --   insert into public.notificaciones (perfil_id, titulo, cuerpo, tipo)
