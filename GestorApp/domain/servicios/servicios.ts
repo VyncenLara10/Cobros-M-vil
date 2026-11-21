@@ -331,6 +331,8 @@ export interface ClienteBusqueda {
   zona: string;
   dpi?: string;
   deudaTotal?: number;
+  lat?: number;
+  lng?: number;
 }
 
 function mapClienteMock(c: ClienteDB): ClienteBusqueda {
@@ -353,7 +355,7 @@ export async function buscarClienteDB(query: string): Promise<ClienteBusqueda[]>
 
   const { data, error } = await supabase
     .from('clientes')
-    .select('id, nombre, telefono, direccion, municipio, zona, dpi')
+    .select('id, nombre, telefono, direccion, municipio, zona, dpi, lat, lng')
     .or(`nombre.ilike.%${q}%,dpi.ilike.%${q}%`)
     .limit(20);
   if (error) {
@@ -368,6 +370,8 @@ export async function buscarClienteDB(query: string): Promise<ClienteBusqueda[]>
     municipio: c.municipio ?? '',
     zona: c.zona ?? '',
     dpi: c.dpi ?? undefined,
+    lat: c.lat != null ? Number(c.lat) : undefined,
+    lng: c.lng != null ? Number(c.lng) : undefined,
   }));
 }
 
@@ -399,6 +403,13 @@ export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: bo
   if (!supabaseConfigurado) return { ok: false, error: 'No está configurado Supabase. No se creó ningún servicio.' };
 
   try {
+    // Validar también en la capa de datos, no solo en el formulario.
+    // No geocodificamos ni consultamos direcciones externas.
+    const punto = input.ubicacion;
+    if (punto && (!Number.isFinite(punto.lat) || !Number.isFinite(punto.lng) ||
+      punto.lat < -90 || punto.lat > 90 || punto.lng < -180 || punto.lng > 180)) {
+      return { ok: false, error: 'Coordenadas fuera del rango permitido.' };
+    }
     const advertencias: string[] = [];
     let clienteId = input.cliente.clienteId;
 
@@ -421,10 +432,18 @@ export async function crearServicio(input: NuevoServicioInput): Promise<{ ok: bo
       if (errCli || !cli) return { ok: false, error: errCli?.message ?? 'No se pudo crear el cliente' };
       clienteId = cli.id;
     } else if (input.ubicacion) {
-      await supabase
+      // Antes se ignoraba un UPDATE rechazado por RLS; eso hacía creer que
+      // un punto había quedado guardado cuando realmente no fue así.
+      const { data: actualizado, error: errorUbicacion } = await supabase
         .from('clientes')
         .update({ lat: input.ubicacion.lat, lng: input.ubicacion.lng })
-        .eq('id', clienteId);
+        .eq('id', clienteId)
+        .select('id')
+        .maybeSingle();
+      if (errorUbicacion || !actualizado) {
+        return { ok: false, error: 'No se pudo guardar la ubicación del cliente vinculado: ' +
+          (errorUbicacion?.message ?? 'Sin permisos para modificar ese cliente.') };
+      }
     }
 
     const deudaTotal = input.deudaTotal ?? 0;
