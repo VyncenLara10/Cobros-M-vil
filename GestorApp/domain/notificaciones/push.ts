@@ -85,14 +85,21 @@ export async function registrarPushToken(): Promise<string | null> {
             { perfil_id: uid, expo_push_token: token, plataforma: Platform.OS },
             { onConflict: 'expo_push_token' },
           );
-        if (error) console.warn('[push] no se pudo guardar el token', error.message);
+        if (error) {
+          console.warn('[push] no se pudo guardar el token', error.message);
+          return null;
+        }
         // No borrar todos los otros tokens: un gestor puede tener varios
         // dispositivos registrados. Los inválidos se depuran con recibos Expo.
       }
     }
     return token;
-  } catch {
-    return null; // sin red, sin credenciales push configuradas, o permiso denegado: no bloquea el login
+  } catch (error) {
+    // Se deja una pista útil en logs para depurar Firebase/EAS, sin imprimir
+    // el Expo Push Token ni otra credencial. Nunca interrumpir el login.
+    console.warn('[push] No se pudo registrar el dispositivo:',
+      error instanceof Error ? error.message : 'error desconocido');
+    return null;
   }
 }
 
